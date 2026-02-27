@@ -1,0 +1,34 @@
+# Binary
+go-joplin
+/go-joplin
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# Coverage
+coverage.html
+*.coverprofile
+coverage.txt
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local / env (optional; uncomment if you keep secrets here)
+# .env
+# .env.local
+# config-*.local.json
