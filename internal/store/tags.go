@@ -7,6 +7,27 @@ import (
 	"github.com/jescarri/go-joplin/internal/models"
 )
 
+// GetTagByTitle returns the first tag matching the given title (case-insensitive).
+func (db *DB) GetTagByTitle(title string) (*models.Tag, error) {
+	t := &models.Tag{}
+	err := db.QueryRow(`SELECT id, title, created_time, updated_time,
+		user_created_time, user_updated_time, encryption_cipher_text, encryption_applied,
+		is_shared, parent_id, user_data
+		FROM tags WHERE LOWER(title) = LOWER(?) LIMIT 1`, title).Scan(
+		&t.ID, &t.Title, &t.CreatedTime, &t.UpdatedTime,
+		&t.UserCreatedTime, &t.UserUpdatedTime, &t.EncryptionCipherText, &t.EncryptionApplied,
+		&t.IsShared, &t.ParentID, &t.UserData,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	t.Type_ = models.TypeTag
+	return t, nil
+}
+
 // GetTag returns a tag by ID.
 func (db *DB) GetTag(id string) (*models.Tag, error) {
 	t := &models.Tag{}

@@ -1,0 +1,37 @@
+# Prometheus recording rules for joplingo metrics.
+# Add this to your Prometheus config (rule_files) to compute p99 and other quantiles
+# from the standard http_request_duration_seconds histogram.
+#
+# Example scrape_config for joplingo metrics server (default port 9091):
+#   scrape_configs:
+#     - job_name: joplingo
+#       static_configs:
+#         - targets: ['localhost:9091']
+
+groups:
+  - name: joplingo_api
+    interval: 30s
+    rules:
+      # p99 latency (seconds) per route. Use histogram_quantile; do not compute in-app.
+      - record: joplingo:http_request_duration_seconds:p99
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(http_request_duration_seconds_bucket[5m])) by (le, method, route)
+          )
+        labels:
+          quantile: "0.99"
+      # p95 and p50 for convenience
+      - record: joplingo:http_request_duration_seconds:p95
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(http_request_duration_seconds_bucket[5m])) by (le, method, route)
+          )
+        labels:
+          quantile: "0.95"
+      - record: joplingo:http_request_duration_seconds:p50
+        expr: |
+          histogram_quantile(0.50,
+            sum(rate(http_request_duration_seconds_bucket[5m])) by (le, method, route)
+          )
+        labels:
+          quantile: "0.50"

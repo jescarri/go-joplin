@@ -25,6 +25,8 @@ var configCmd = &cobra.Command{
 		fmt.Printf("Master Pwd:     %s\n", redact(cfg.MasterPassword))
 		fmt.Printf("Data Dir:       %s\n", cfg.DataDir)
 		fmt.Printf("Listen Address: %s\n", cfg.ListenAddr())
+		fmt.Printf("Tracing:        %v (service=%s, endpoint=%s)\n", cfg.Observability.Tracing.Enabled, cfg.Observability.Tracing.ServiceName, cfg.Observability.Tracing.Endpoint)
+		fmt.Printf("Metrics:        %v (prometheus_port=%d)\n", cfg.Observability.Metrics.Enabled, cfg.Observability.Metrics.PrometheusPort)
 		return nil
 	},
 }

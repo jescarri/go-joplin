@@ -124,6 +124,13 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 		if note.ID == "" {
 			return nil
 		}
+		if note.EncryptionApplied == 1 {
+			existing, err := db.GetNote(note.ID)
+			if err == nil && existing != nil && existing.EncryptionApplied == 0 {
+				slog.Debug("skipping encrypted server copy, local is already decrypted", "id", note.ID)
+				return db.UpsertSyncItem(note.ID, models.TypeNote, syncTarget)
+			}
+		}
 		if err := db.UpsertNote(note); err != nil {
 			return fmt.Errorf("cannot upsert note %s: %w", note.ID, err)
 		}
@@ -134,6 +141,13 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 		if folder.ID == "" {
 			return nil
 		}
+		if folder.EncryptionApplied == 1 {
+			existing, err := db.GetFolder(folder.ID)
+			if err == nil && existing != nil && existing.EncryptionApplied == 0 {
+				slog.Debug("skipping encrypted server copy, local folder is already decrypted", "id", folder.ID)
+				return db.UpsertSyncItem(folder.ID, models.TypeFolder, syncTarget)
+			}
+		}
 		if err := db.UpsertFolder(folder); err != nil {
 			return fmt.Errorf("cannot upsert folder %s: %w", folder.ID, err)
 		}
@@ -143,6 +157,13 @@ func applyDeltaItem(backend SyncBackend, db *store.DB, syncTarget int, item Delt
 		tag := models.DeserializeTag(string(content))
 		if tag.ID == "" {
 			return nil
+		}
+		if tag.EncryptionApplied == 1 {
+			existing, err := db.GetTag(tag.ID)
+			if err == nil && existing != nil && existing.EncryptionApplied == 0 {
+				slog.Debug("skipping encrypted server copy, local tag is already decrypted", "id", tag.ID)
+				return db.UpsertSyncItem(tag.ID, models.TypeTag, syncTarget)
+			}
 		}
 		if err := db.UpsertTag(tag); err != nil {
 			return fmt.Errorf("cannot upsert tag %s: %w", tag.ID, err)

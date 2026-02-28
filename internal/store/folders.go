@@ -7,6 +7,27 @@ import (
 	"github.com/jescarri/go-joplin/internal/models"
 )
 
+// GetFolderByTitle returns the first folder matching the given title (case-insensitive).
+func (db *DB) GetFolderByTitle(title string) (*models.Folder, error) {
+	f := &models.Folder{}
+	err := db.QueryRow(`SELECT id, title, created_time, updated_time,
+		user_created_time, user_updated_time, encryption_cipher_text, encryption_applied,
+		parent_id, is_shared, share_id, master_key_id, icon, user_data, deleted_time
+		FROM folders WHERE LOWER(title) = LOWER(?) LIMIT 1`, title).Scan(
+		&f.ID, &f.Title, &f.CreatedTime, &f.UpdatedTime,
+		&f.UserCreatedTime, &f.UserUpdatedTime, &f.EncryptionCipherText, &f.EncryptionApplied,
+		&f.ParentID, &f.IsShared, &f.ShareID, &f.MasterKeyID, &f.Icon, &f.UserData, &f.DeletedTime,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	f.Type_ = models.TypeFolder
+	return f, nil
+}
+
 // GetFolder returns a folder by ID.
 func (db *DB) GetFolder(id string) (*models.Folder, error) {
 	f := &models.Folder{}

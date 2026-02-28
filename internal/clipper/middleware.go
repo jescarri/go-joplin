@@ -6,8 +6,13 @@ import (
 )
 
 // bearerAuth validates the API key from the Authorization: Bearer <key> header.
+// Skips /health so probes do not require a token.
 func (s *Server) bearerAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if s.apiKey == "" {
 			// No API key configured, reject all requests
 			writeError(w, http.StatusUnauthorized, "API key not configured on server")

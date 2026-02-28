@@ -23,7 +23,7 @@ func clipAPIKey() string {
 	if apiKey != "" {
 		return apiKey
 	}
-	return os.Getenv("JOPLINGO_API_KEY")
+	return os.Getenv("GOJOPLIN_API_KEY")
 }
 
 func clipBaseURL() string {
@@ -38,7 +38,7 @@ var httpClient = &http.Client{Timeout: 30 * time.Second}
 func clipRequest(method, path string, body interface{}) ([]byte, error) {
 	key := clipAPIKey()
 	if key == "" {
-		return nil, fmt.Errorf("--api-key flag or JOPLINGO_API_KEY env var is required")
+		return nil, fmt.Errorf("--api-key flag or GOJOPLIN_API_KEY env var is required")
 	}
 
 	var bodyReader io.Reader

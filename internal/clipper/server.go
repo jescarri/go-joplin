@@ -1,13 +1,13 @@
 package clipper
 
 import (
-	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/jescarri/go-joplin/internal/store"
+	"github.com/jescarri/go-joplin/internal/telemetry"
 )
 
 // SyncTrigger is the interface used to trigger a sync after mutations.
@@ -17,21 +17,24 @@ type SyncTrigger interface {
 
 // Server is the Joplin Clipper REST API server.
 type Server struct {
-	db       *store.DB
-	apiToken string
-	apiKey   string
-	router   chi.Router
-	syncer   SyncTrigger
+	db        *store.DB
+	apiToken  string
+	apiKey    string
+	router    chi.Router
+	syncer    SyncTrigger
+	mcpHandler http.Handler // optional MCP SSE handler, mounted at /mcp
 }
 
 // NewServer creates a new clipper server.
 // syncer may be nil if no sync trigger is desired.
-func NewServer(db *store.DB, apiToken string, apiKey string, syncer SyncTrigger) *Server {
+// mcpHandler may be nil; if set, it is mounted at /mcp (Bearer auth applied).
+func NewServer(db *store.DB, apiToken string, apiKey string, syncer SyncTrigger, mcpHandler http.Handler) *Server {
 	s := &Server{
-		db:       db,
-		apiToken: apiToken,
-		apiKey:   apiKey,
-		syncer:   syncer,
+		db:         db,
+		apiToken:   apiToken,
+		apiKey:     apiKey,
+		syncer:     syncer,
+		mcpHandler: mcpHandler,
 	}
 	s.buildRouter()
 	return s
@@ -52,7 +55,7 @@ func (s *Server) triggerSync() {
 func (s *Server) buildRouter() {
 	r := chi.NewRouter()
 
-	// Middleware
+	// Middleware: recovery, real IP, CORS first
 	r.Use(chiMiddleware.Recoverer)
 	r.Use(chiMiddleware.RealIP)
 	r.Use(cors.Handler(cors.Options{
@@ -63,17 +66,15 @@ func (s *Server) buildRouter() {
 		AllowCredentials: false,
 		MaxAge:           300,
 	}))
-	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			slog.Debug("request", "method", r.Method, "path", r.URL.Path)
-			next.ServeHTTP(w, r)
-		})
-	})
-
-	// All routes require Bearer token authentication
+	// Metrics (request duration histogram); skips /health
+	r.Use(telemetry.Middleware)
+	// Request logging; skips /health
+	r.Use(telemetry.LoggingSkipHealth)
+	// Bearer auth (skips /health so probes need no token)
 	r.Use(s.bearerAuth)
 
-	// Health / auth
+	// Routes (all middlewares above)
+	r.Get("/health", s.handleHealth)
 	r.Get("/ping", s.handlePing)
 	r.Post("/auth", s.handleAuth)
 	r.Get("/auth/check", s.handleAuthCheck)
@@ -119,6 +120,11 @@ func (s *Server) buildRouter() {
 	// Events
 	r.Get("/events", s.handleListEvents)
 	r.Get("/events/{id}", s.handleGetEvent)
+
+	// MCP over SSE (optional; Bearer auth applied). GET /mcp = new session, POST /mcp?sessionid=... = message.
+	if s.mcpHandler != nil {
+		r.Handle("/mcp", s.mcpHandler)
+	}
 
 	s.router = r
 }
