@@ -11,8 +11,10 @@ import (
 	"time"
 
 	"github.com/jescarri/go-joplin/internal/clipper"
+	"github.com/jescarri/go-joplin/internal/mcp"
 	"github.com/jescarri/go-joplin/internal/store"
 	"github.com/jescarri/go-joplin/internal/sync"
+	"github.com/jescarri/go-joplin/internal/telemetry"
 	"github.com/spf13/cobra"
 )
 
@@ -25,6 +27,28 @@ var serveCmd = &cobra.Command{
 			return err
 		}
 
+		ctx := context.Background()
+		if cfg.Observability.Tracing.Enabled {
+			shutdown, err := telemetry.InitTracing(ctx, cfg.Observability.Tracing)
+			if err != nil {
+				return fmt.Errorf("tracing: %w", err)
+			}
+			if shutdown != nil {
+				defer func() { _ = shutdown(context.Background()) }()
+			}
+		}
+
+		if cfg.Observability.Metrics.Enabled && cfg.Observability.Metrics.PrometheusPort > 0 {
+			metricsAddr := fmt.Sprintf(":%d", cfg.Observability.Metrics.PrometheusPort)
+			go func() {
+				if err := telemetry.StartMetricsServer(ctx, metricsAddr, func() {
+					slog.Info("metrics server listening", "addr", metricsAddr)
+				}); err != nil {
+					slog.Error("metrics server failed", "error", err)
+				}
+			}()
+		}
+
 		db, err := store.Open(cfg.DataDir)
 		if err != nil {
 			return err
@@ -33,15 +57,17 @@ var serveCmd = &cobra.Command{
 
 		var backend sync.SyncBackend
 		if cfg.SyncTarget == 8 {
-			backend, err = sync.NewS3Backend(cfg)
+			b, err := sync.NewS3Backend(cfg)
 			if err != nil {
 				return fmt.Errorf("S3 backend: %w", err)
 			}
+			backend = sync.NewTracedBackend(b, "s3")
 		} else {
-			backend, err = sync.NewClient(cfg)
+			c, err := sync.NewClient(cfg)
 			if err != nil {
 				return err
 			}
+			backend = sync.NewTracedBackend(c, "joplin_server")
 		}
 
 		engine := sync.NewEngine(backend, db, cfg.MasterPassword)
@@ -76,10 +102,16 @@ var serveCmd = &cobra.Command{
 		}()
 
 		if cfg.APIKey == "" {
-			return fmt.Errorf("--api-key flag or JOPLINGO_API_KEY env var is required")
+			return fmt.Errorf("--api-key flag or GOJOPLIN_API_KEY env var is required")
 		}
 
-		srv := clipper.NewServer(db, cfg.APIToken, cfg.APIKey, engine)
+		var mcpHandler http.Handler
+		{
+			mcpDeps := &mcp.Deps{DB: db, Syncer: engine}
+			mcpServer := mcp.NewServer(mcpDeps)
+			mcpHandler = mcp.NewSSEHandler(func(r *http.Request) *mcp.Server { return mcpServer })
+		}
+		srv := clipper.NewServer(db, cfg.APIToken, cfg.APIKey, engine, mcpHandler)
 		addr := cfg.ListenAddr()
 		slog.Info("starting clipper server", "addr", addr)
 

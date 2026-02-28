@@ -112,23 +112,58 @@ func (db *DB) RemoveDeletedItem(id int) error {
 	return err
 }
 
+// ListSyncItemIDs returns all (item_id, item_type) pairs for a given sync target.
+func (db *DB) ListSyncItemIDs(syncTarget int) ([]models.SyncItem, error) {
+	rows, err := db.Query("SELECT item_id, item_type FROM sync_items WHERE sync_target = ?", syncTarget)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []models.SyncItem
+	for rows.Next() {
+		var si models.SyncItem
+		if err := rows.Scan(&si.ItemID, &si.ItemType); err != nil {
+			return nil, err
+		}
+		items = append(items, si)
+	}
+	return items, nil
+}
+
 // DeleteLocalItem removes an item from the local database (called during sync pull).
+// When itemType is 0 (unknown, e.g. from a delta delete where the .md filename
+// doesn't encode the type), it looks up the type from the sync_items table.
 func (db *DB) DeleteLocalItem(itemID string, itemType int) error {
+	if itemType == 0 {
+		var resolved int
+		err := db.QueryRow("SELECT item_type FROM sync_items WHERE item_id = ? LIMIT 1", itemID).Scan(&resolved)
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		itemType = resolved
+	}
+
+	var err error
 	switch itemType {
 	case models.TypeNote:
-		_, err := db.Exec("DELETE FROM notes WHERE id = ?", itemID)
-		return err
+		_, err = db.Exec("DELETE FROM notes WHERE id = ?", itemID)
 	case models.TypeFolder:
-		_, err := db.Exec("DELETE FROM folders WHERE id = ?", itemID)
-		return err
+		_, err = db.Exec("DELETE FROM folders WHERE id = ?", itemID)
 	case models.TypeTag:
-		_, err := db.Exec("DELETE FROM tags WHERE id = ?", itemID)
-		return err
+		_, err = db.Exec("DELETE FROM tags WHERE id = ?", itemID)
 	case models.TypeNoteTag:
-		_, err := db.Exec("DELETE FROM note_tags WHERE id = ?", itemID)
-		return err
+		_, err = db.Exec("DELETE FROM note_tags WHERE id = ?", itemID)
 	case models.TypeResource:
-		return db.DeleteResource(itemID)
+		err = db.DeleteResource(itemID)
 	}
-	return nil
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec("DELETE FROM sync_items WHERE item_id = ?", itemID)
+	return err
 }

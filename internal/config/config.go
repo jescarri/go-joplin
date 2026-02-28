@@ -5,14 +5,64 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 )
+
+// TracingConfig holds OpenTelemetry tracing configuration.
+type TracingConfig struct {
+	Enabled     bool    `json:"enabled"`
+	Exporter    string  `json:"exporter"` // "otlp"
+	Protocol    string  `json:"protocol"` // "http" or "grpc"
+	Endpoint    string  `json:"endpoint"` // e.g. from OTEL_EXPORTER_OTLP_ENDPOINT
+	ServiceName string  `json:"service_name"`
+	SampleRate  float64 `json:"sample_rate"`
+}
+
+// MetricsConfig holds metrics configuration (Prometheus).
+type MetricsConfig struct {
+	Enabled        bool   `json:"enabled"`
+	Exporter       string `json:"exporter"`        // "prometheus"
+	PrometheusPort int    `json:"prometheus_port"` // port for /metrics
+}
+
+// ObservabilityConfig holds tracing and metrics configuration.
+// Loaded from environment variables; endpoint supports ${VAR} expansion.
+func DefaultObservability() ObservabilityConfig {
+	return ObservabilityConfig{
+		Tracing: TracingConfig{
+			Enabled:     true,
+			Exporter:    "otlp",
+			Protocol:    "http",
+			Endpoint:    os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+			ServiceName: "go-joplin",
+			SampleRate:  1.0,
+		},
+		Metrics: MetricsConfig{
+			Enabled:        true,
+			Exporter:       "prometheus",
+			PrometheusPort: 9091,
+		},
+	}
+}
+
+// ObservabilityConfig holds tracing and metrics config.
+type ObservabilityConfig struct {
+	Tracing TracingConfig `json:"tracing"`
+	Metrics MetricsConfig `json:"metrics"`
+}
+
+// ExpandEnv replaces ${VAR} in s with os.Getenv("VAR").
+func ExpandEnv(s string) string {
+	return os.Expand(s, func(key string) string { return os.Getenv(key) })
+}
 
 // Config holds the resolved configuration for go-joplin.
 type Config struct {
-	SyncTarget     int    `json:"sync.target"`
-	ServerURL      string `json:"sync.9.path"`
-	Username       string `json:"sync.9.username"`
-	Password       string `json:"sync.9.password"`
+	SyncTarget int    `json:"sync.target"`
+	ServerURL  string `json:"sync.9.path"`
+	Username   string `json:"sync.9.username"`
+	Password   string `json:"sync.9.password"`
 	// S3 (sync target 8)
 	S3Bucket         string `json:"sync.8.path"`
 	S3URL            string `json:"sync.8.url"`
@@ -26,6 +76,9 @@ type Config struct {
 	MasterPassword string `json:"-"`
 	DataDir        string `json:"-"`
 	Port           int    `json:"-"`
+
+	// Observability (tracing + metrics). Filled from env in Load().
+	Observability ObservabilityConfig `json:"-"`
 }
 
 // ListenAddr returns the address the clipper server should listen on.
@@ -50,7 +103,7 @@ type Overrides struct {
 // Precedence: env vars > CLI flags (via overrides) > config file.
 func Load(cfgPath string, overrides ...Overrides) (*Config, error) {
 	if cfgPath == "" {
-		if v := os.Getenv("JOPLINGO_CONFIG_PATH"); v != "" {
+		if v := os.Getenv("GOJOPLIN_CONFIG_PATH"); v != "" {
 			cfgPath = v
 		} else {
 			home, err := os.UserHomeDir()
@@ -140,16 +193,16 @@ func Load(cfgPath string, overrides ...Overrides) (*Config, error) {
 	}
 
 	// Env vars have highest precedence
-	if v := os.Getenv("JOPLINGO_USERNAME"); v != "" {
+	if v := os.Getenv("GOJOPLIN_USERNAME"); v != "" {
 		cfg.Username = v
 	}
-	if v := os.Getenv("JOPLINGO_PASSWORD"); v != "" {
+	if v := os.Getenv("GOJOPLIN_PASSWORD"); v != "" {
 		cfg.Password = v
 	}
-	if v := os.Getenv("JOPLINGO_API_KEY"); v != "" {
+	if v := os.Getenv("GOJOPLIN_API_KEY"); v != "" {
 		cfg.APIKey = v
 	}
-	if v := os.Getenv("JOPLINGO_MASTER_PASSWORD"); v != "" {
+	if v := os.Getenv("GOJOPLIN_MASTER_PASSWORD"); v != "" {
 		cfg.MasterPassword = v
 	}
 
@@ -177,15 +230,43 @@ func Load(cfgPath string, overrides ...Overrides) (*Config, error) {
 	}
 
 	// Data directory
-	cfg.DataDir = os.Getenv("JOPLINGO_DATA_DIR")
+	cfg.DataDir = os.Getenv("GOJOPLIN_DATA_DIR")
 	if cfg.DataDir == "" {
 		home, _ := os.UserHomeDir()
 		cfg.DataDir = filepath.Join(home, ".local", "share", "joplingo")
 	}
 
 	// Port override
-	if portStr := os.Getenv("JOPLINGO_PORT"); portStr != "" {
+	if portStr := os.Getenv("GOJOPLIN_PORT"); portStr != "" {
 		fmt.Sscanf(portStr, "%d", &cfg.Port)
+	}
+
+	// Observability: defaults then env overrides
+	cfg.Observability = DefaultObservability()
+	if v := os.Getenv("GOJOPLIN_TRACING_ENABLED"); v != "" {
+		cfg.Observability.Tracing.Enabled = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := os.Getenv("GOJOPLIN_TRACING_PROTOCOL"); v != "" {
+		cfg.Observability.Tracing.Protocol = v
+	}
+	if v := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); v != "" {
+		cfg.Observability.Tracing.Endpoint = ExpandEnv(v)
+	}
+	if v := os.Getenv("GOJOPLIN_TRACING_SERVICE_NAME"); v != "" {
+		cfg.Observability.Tracing.ServiceName = v
+	}
+	if v := os.Getenv("GOJOPLIN_TRACING_SAMPLE_RATE"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.Observability.Tracing.SampleRate = f
+		}
+	}
+	if v := os.Getenv("GOJOPLIN_METRICS_ENABLED"); v != "" {
+		cfg.Observability.Metrics.Enabled = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := os.Getenv("GOJOPLIN_METRICS_PROMETHEUS_PORT"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil {
+			cfg.Observability.Metrics.PrometheusPort = p
+		}
 	}
 
 	return cfg, nil

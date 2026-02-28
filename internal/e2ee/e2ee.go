@@ -1,6 +1,7 @@
 package e2ee
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
@@ -15,8 +16,14 @@ import (
 	"strings"
 	"unicode/utf16"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/crypto/pbkdf2"
 )
+
+const e2eeTracerName = "github.com/jescarri/go-joplin/internal/e2ee"
 
 // Joplin encryption methods.
 const (
@@ -68,6 +75,11 @@ func NewService() *Service {
 // LoadMasterKey decrypts a master key using the user's master password and caches it.
 // encryptionMethod is the encryption_method field from the MasterKey entity.
 func (s *Service) LoadMasterKey(id string, encryptedContent string, password string, encryptionMethod int) error {
+	ctx := context.Background()
+	tr := otel.Tracer(e2eeTracerName)
+	_, span := tr.Start(ctx, "e2ee.load_master_key", trace.WithAttributes(attribute.String("master_key_id", id)))
+	defer span.End()
+
 	var plaintext []byte
 	var err error
 
@@ -80,6 +92,8 @@ func (s *Service) LoadMasterKey(id string, encryptedContent string, password str
 		return fmt.Errorf("e2ee: unsupported master key encryption method %d", encryptionMethod)
 	}
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("e2ee: cannot decrypt master key %s: %w", id, err)
 	}
 
@@ -317,9 +331,17 @@ const StringV1ChunkSize = 65536
 // EncryptString encrypts plainText using the given master key and returns a JED01 envelope (method 10 = StringV1).
 // The master key must already be loaded via LoadMasterKey. Plaintext is encoded as UTF-16LE before encryption.
 func (s *Service) EncryptString(masterKeyID string, plainText string) (string, error) {
+	ctx := context.Background()
+	tr := otel.Tracer(e2eeTracerName)
+	_, span := tr.Start(ctx, "e2ee.encrypt_string", trace.WithAttributes(attribute.String("master_key_id", masterKeyID)))
+	defer span.End()
+
 	masterKey, ok := s.masterKeys[masterKeyID]
 	if !ok {
-		return "", fmt.Errorf("e2ee: master key %s not loaded", masterKeyID)
+		err := fmt.Errorf("e2ee: master key %s not loaded", masterKeyID)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return "", err
 	}
 	if len(masterKeyID) != 32 {
 		return "", fmt.Errorf("e2ee: invalid master key ID length %d", len(masterKeyID))
@@ -334,6 +356,8 @@ func (s *Service) EncryptString(masterKeyID string, plainText string) (string, e
 		}
 		chunk, err := encryptChunk(masterKey, plainBytes[off:end], 3)
 		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			return "", fmt.Errorf("e2ee: encrypt chunk: %w", err)
 		}
 		chunks = append(chunks, chunk)
@@ -403,14 +427,24 @@ func encryptAESGCM(key, nonce, plaintext []byte) ([]byte, error) {
 
 // DecryptString decrypts a JED01 cipher text (methods 5/7 = SJCL, 10 = StringV1).
 func (s *Service) DecryptString(cipherText string) (string, error) {
+	ctx := context.Background()
+	tr := otel.Tracer(e2eeTracerName)
+	_, span := tr.Start(ctx, "e2ee.decrypt_string")
+	defer span.End()
+
 	masterKeyID, method, chunks, err := parseJED01(cipherText)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return "", err
 	}
 
 	masterKey, ok := s.masterKeys[masterKeyID]
 	if !ok {
-		return "", fmt.Errorf("e2ee: master key %s not loaded", masterKeyID)
+		err := fmt.Errorf("e2ee: master key %s not loaded", masterKeyID)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return "", err
 	}
 
 	switch method {
@@ -419,6 +453,8 @@ func (s *Service) DecryptString(cipherText string) (string, error) {
 		for _, chunk := range chunks {
 			decrypted, err := decryptChunk(masterKey, chunk, 3)
 			if err != nil {
+				span.RecordError(err)
+				span.SetStatus(codes.Error, err.Error())
 				return "", fmt.Errorf("e2ee: chunk decryption failed: %w", err)
 			}
 			result = append(result, decrypted...)
@@ -431,6 +467,8 @@ func (s *Service) DecryptString(cipherText string) (string, error) {
 		for _, chunk := range chunks {
 			decrypted, err := sjclDecrypt(string(masterKey), string(chunk))
 			if err != nil {
+				span.RecordError(err)
+				span.SetStatus(codes.Error, err.Error())
 				return "", fmt.Errorf("e2ee: sjcl chunk decryption failed: %w", err)
 			}
 			result = append(result, decrypted...)
@@ -439,30 +477,48 @@ func (s *Service) DecryptString(cipherText string) (string, error) {
 		return unescapePercentXX(string(result)), nil
 
 	default:
-		return "", fmt.Errorf("e2ee: unsupported string encryption method %d", method)
+		err := fmt.Errorf("e2ee: unsupported string encryption method %d", method)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return "", err
 	}
 }
 
 // DecryptFile decrypts a JED01 cipher text containing raw binary data (method 9).
 func (s *Service) DecryptFile(cipherText string) ([]byte, error) {
+	ctx := context.Background()
+	tr := otel.Tracer(e2eeTracerName)
+	_, span := tr.Start(ctx, "e2ee.decrypt_file")
+	defer span.End()
+
 	masterKeyID, method, chunks, err := parseJED01(cipherText)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
 
 	masterKey, ok := s.masterKeys[masterKeyID]
 	if !ok {
-		return nil, fmt.Errorf("e2ee: master key %s not loaded", masterKeyID)
+		err := fmt.Errorf("e2ee: master key %s not loaded", masterKeyID)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
 	}
 
 	if method != MethodFileV1 {
-		return nil, fmt.Errorf("e2ee: unsupported file encryption method %d", method)
+		err := fmt.Errorf("e2ee: unsupported file encryption method %d", method)
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
 	}
 
 	var result []byte
 	for _, chunk := range chunks {
 		decrypted, err := decryptChunk(masterKey, chunk, 3)
 		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			return nil, fmt.Errorf("e2ee: chunk decryption failed: %w", err)
 		}
 		result = append(result, decrypted...)

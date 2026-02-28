@@ -40,8 +40,8 @@ func Execute() {
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file path (default: ~/.config/joplin-desktop/settings.json)")
-	rootCmd.PersistentFlags().StringVar(&username, "username", "", "Joplin Server username (env: JOPLINGO_USERNAME)")
-	rootCmd.PersistentFlags().StringVar(&password, "password", "", "Joplin Server password (env: JOPLINGO_PASSWORD)")
-	rootCmd.PersistentFlags().StringVar(&apiKey, "api-key", "", "API key for clipper server authentication (env: JOPLINGO_API_KEY)")
-	rootCmd.PersistentFlags().StringVar(&masterPassword, "master-password", "", "E2EE master password for decrypting notes (env: JOPLINGO_MASTER_PASSWORD)")
+	rootCmd.PersistentFlags().StringVar(&username, "username", "", "Joplin Server username (env: GOJOPLIN_USERNAME)")
+	rootCmd.PersistentFlags().StringVar(&password, "password", "", "Joplin Server password (env: GOJOPLIN_PASSWORD)")
+	rootCmd.PersistentFlags().StringVar(&apiKey, "api-key", "", "API key for clipper server authentication (env: GOJOPLIN_API_KEY)")
+	rootCmd.PersistentFlags().StringVar(&masterPassword, "master-password", "", "E2EE master password for decrypting notes (env: GOJOPLIN_MASTER_PASSWORD)")
 }
