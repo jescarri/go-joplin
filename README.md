@@ -1,6 +1,8 @@
 # go-joplin
 
-A Joplin Web Clipper server implementation in Go. It runs a local HTTP server that the Joplin Web Clipper browser extension can talk to, and syncs your notes with either **Joplin Server** or an **S3-compatible bucket** (AWS S3, MinIO, etc.).
+A Joplin Web Clipper server implementation in Go. It runs a local HTTP server that the [Joplin](https://joplinapp.org/) Web Clipper browser extension can talk to, and syncs your notes with either **Joplin Server** or an **S3-compatible bucket** (AWS S3, MinIO, etc.).
+
+This project is not affiliated with Joplin. **Joplin** is the open-source note-taking app by [Laurent Cozic](https://github.com/laurent22). See [https://joplinapp.org/](https://joplinapp.org/) and the [Joplin repository](https://github.com/laurent22/joplin) for the official app, documentation, and community.
 
 ![go-joplin](go-joplin.png)
 
@@ -113,4 +115,4 @@ go-joplin reads the Joplin desktop app config (e.g. `~/.config/joplin-desktop/se
 
 ## License
 
-See the repository license file.
+This project is licensed under the same terms as Joplin: **AGPL-3.0-or-later**. See the [LICENSE](LICENSE) file in this repository. The [Joplin project](https://github.com/laurent22/joplin) is © 2016–2025 [Laurent Cozic](https://github.com/laurent22); Joplin® is a trademark of JOPLIN SAS.
