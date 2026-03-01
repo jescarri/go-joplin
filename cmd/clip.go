@@ -87,7 +87,7 @@ func prettyJSON(data []byte) string {
 // clipCmd is the parent command for clipper API interactions.
 var clipCmd = &cobra.Command{
 	Use:   "clip",
-	Short: "Interact with the Joplingo clipper API",
+	Short: "Interact with the Gojoplin clipper API",
 }
 
 // --- ping ---

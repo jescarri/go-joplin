@@ -22,7 +22,7 @@ func Open(dataDir string) (*DB, error) {
 		return nil, fmt.Errorf("cannot create data directory: %w", err)
 	}
 
-	dbPath := filepath.Join(dataDir, "joplingo.sqlite")
+	dbPath := filepath.Join(dataDir, "gojoplin.sqlite")
 	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=on")
 	if err != nil {
 		return nil, fmt.Errorf("cannot open database: %w", err)

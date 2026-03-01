@@ -233,7 +233,7 @@ func Load(cfgPath string, overrides ...Overrides) (*Config, error) {
 	cfg.DataDir = os.Getenv("GOJOPLIN_DATA_DIR")
 	if cfg.DataDir == "" {
 		home, _ := os.UserHomeDir()
-		cfg.DataDir = filepath.Join(home, ".local", "share", "joplingo")
+		cfg.DataDir = filepath.Join(home, ".local", "share", "gojoplin")
 	}
 
 	// Port override
