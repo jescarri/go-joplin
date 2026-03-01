@@ -10,7 +10,7 @@ import (
 type Server = sdkmcp.Server
 
 const (
-	implementationName    = "joplingo"
+	implementationName    = "gojoplin"
 	implementationVersion = "v1.0.0"
 )
 

@@ -1,6 +1,12 @@
 # go-joplin
 
+[![CI](https://github.com/jescarri/go-joplin/actions/workflows/ci.yml/badge.svg)](https://github.com/jescarri/go-joplin/actions/workflows/ci.yml)
+[![Release](https://github.com/jescarri/go-joplin/actions/workflows/release.yml/badge.svg)](https://github.com/jescarri/go-joplin/actions/workflows/release.yml)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+
 A Joplin Web Clipper server implementation in Go. It runs a local HTTP server that the [Joplin](https://joplinapp.org/) Web Clipper browser extension can talk to, and syncs your notes with either **Joplin Server** or an **S3-compatible bucket** (AWS S3, MinIO, etc.).
+
+**Purpose:** This server and its MCP (Model Context Protocol) endpoint let you run **fully headless**—no Joplin desktop or mobile app required. Sync and serve your notes from a single binary, and expose them to **agents over the network** (e.g. AI assistants, automation) without installing Joplin on the same machine.
 
 This project is not affiliated with Joplin. **Joplin** is the open-source note-taking app by [Laurent Cozic](https://github.com/laurent22). See [https://joplinapp.org/](https://joplinapp.org/) and the [Joplin repository](https://github.com/laurent22/joplin) for the official app, documentation, and community.
 
@@ -38,14 +44,16 @@ go install .
 
 ## Configuration
 
-go-joplin reads the Joplin desktop app config (e.g. `~/.config/joplin-desktop/settings.json`). You can override the path with the `GOJOPLIN_CONFIG_PATH` environment variable.
+go-joplin uses the **existing Joplin configuration** from a machine where the Joplin desktop app is installed. The config file (e.g. `~/.config/joplin-desktop/settings.json` on Linux, `~/Library/Application Support/Joplin/` on macOS) contains sync targets, API tokens, and other settings. You can override the path with the `GOJOPLIN_CONFIG_PATH` environment variable.
+
+When running in Docker, **mount the Joplin config directory as read-only (`:ro`)** so the container cannot modify your Joplin settings.
 
 **Environment variables** (all optional; override config file and flags):
 
 | Variable | Description |
 |----------|-------------|
 | `GOJOPLIN_CONFIG_PATH` | Path to Joplin settings file (default: `~/.config/joplin-desktop/settings.json`) |
-| `GOJOPLIN_DATA_DIR` | Data directory for DB and resources (default: `~/.local/share/joplingo`) |
+| `GOJOPLIN_DATA_DIR` | Data directory for DB and resources (default: `~/.local/share/gojoplin`) |
 | `GOJOPLIN_PORT` | Clipper server port (default: 41184) |
 | `GOJOPLIN_USERNAME` | Joplin Server username (overrides config) |
 | `GOJOPLIN_PASSWORD` | Joplin Server password (overrides config) |
@@ -99,6 +107,23 @@ go-joplin reads the Joplin desktop app config (e.g. `~/.config/joplin-desktop/se
   ```bash
   ./go-joplin config
   ```
+
+## Docker
+
+Pre-built images are available at `ghcr.io/jescarri/gojoplin`. Mount your Joplin config **read-only** and provide a writable data directory:
+
+```bash
+docker run -d \
+  -p 41184:41184 \
+  -v /path/to/joplin-desktop/config:/config:ro \
+  -v gojoplin-data:/data \
+  -e GOJOPLIN_CONFIG_PATH=/config/settings.json \
+  -e GOJOPLIN_DATA_DIR=/data \
+  ghcr.io/jescarri/gojoplin:latest serve --api-key YOUR_JOPLIN_API_KEY
+```
+
+- `/config:ro` — Joplin settings (sync targets, API token, etc.) mounted **read-only**
+- `/data` — Writable volume for the local SQLite DB and resources
 
 ## Project layout
 

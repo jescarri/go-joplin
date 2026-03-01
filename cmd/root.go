@@ -17,7 +17,7 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "joplingo",
+	Use:   "gojoplin",
 	Short: "Headless Joplin clipper server",
 	Long:  "A headless Joplin clipper server that syncs with Joplin Server and exposes the Clipper REST API.",
 }

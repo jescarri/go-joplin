@@ -18,7 +18,7 @@ func (c *Client) AcquireLock() (interface{}, error) {
 	lock := &Lock{
 		Type:       1, // Sync lock
 		ClientType: 3, // CLI client
-		ClientID:   "joplingo",
+		ClientID:   "gojoplin",
 	}
 
 	data, err := c.post("/api/locks", lock)
