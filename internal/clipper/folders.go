@@ -52,6 +52,10 @@ func (s *Server) handleGetFolder(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
+	if s.policy == nil || !s.policy.CanCreateFolder() {
+		writeError(w, http.StatusForbidden, "folder creation disabled: set GOJOPLIN_MCP_ALLOW_CREATE_FOLDER=true")
+		return
+	}
 	var folder models.Folder
 	if err := json.NewDecoder(r.Body).Decode(&folder); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -77,6 +81,10 @@ func (s *Server) handleUpdateFolder(w http.ResponseWriter, r *http.Request) {
 	}
 	if existing == nil {
 		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if s.policy == nil || !s.policy.CanUpdateNoteInFolder(existing.ID, existing.Title) {
+		writeError(w, http.StatusForbidden, "folder is read-only")
 		return
 	}
 
@@ -107,6 +115,11 @@ func (s *Server) handleUpdateFolder(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteFolder(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	folder, _ := s.db.GetFolder(id)
+	if folder != nil && (s.policy == nil || !s.policy.CanUpdateNoteInFolder(folder.ID, folder.Title)) {
+		writeError(w, http.StatusForbidden, "folder is read-only")
+		return
+	}
 	if err := s.db.DeleteFolder(id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

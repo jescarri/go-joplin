@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/jescarri/go-joplin/internal/models"
@@ -58,6 +59,10 @@ func RegisterAll(server *Server, d *Deps) {
 		Name:        "trigger_sync",
 		Description: "Trigger a sync run (no wait)",
 	}, triggerSyncHandler(d))
+	sdkmcp.AddTool(server, &sdkmcp.Tool{
+		Name:        "get_capabilities",
+		Description: "Get mutation capabilities (folders/tags read-write vs read-only, tag/folder creation allowed). Use this to know which folders you can create notes in and which tags you can use.",
+	}, getCapabilitiesHandler(d))
 }
 
 // --- Input/Output structs (easy to modify per tool) ---
@@ -110,9 +115,10 @@ type ListResourcesIn struct {
 	Limit  int    `json:"limit,omitempty" jsonschema:"max results (default 20)"`
 }
 
-type ListFoldersIn struct{}  // no args
-type ListTagsIn struct{}    // no args
-type TriggerSyncIn struct{} // no args
+type ListFoldersIn struct{}      // no args
+type ListTagsIn struct{}         // no args
+type TriggerSyncIn struct{}      // no args
+type GetCapabilitiesIn struct{}  // no args
 
 // --- Handlers ---
 
@@ -162,9 +168,13 @@ func createNoteHandler(d *Deps) func(context.Context, *sdkmcp.CallToolRequest, C
 			return nil, nil, fmt.Errorf("title is required")
 		}
 
-		parentID, err := resolveParentID(d, in.ParentID, in.FolderName)
+		parentID, folderTitle, err := resolveParentIDWithTitle(d, in.ParentID, in.FolderName)
 		if err != nil {
 			return nil, nil, err
+		}
+
+		if d.Policy == nil || !d.Policy.CanCreateNoteInFolderOrEmpty(parentID, folderTitle) {
+			return nil, nil, fmt.Errorf("folder is read-only: create notes only in writable folders (use get_capabilities to see allowed folders, or set GOJOPLIN_MCP_ALLOW_FOLDERS=* to allow all)")
 		}
 
 		tagIDs, err := resolveTagIDs(d, in.Tags, in.TagNames)
@@ -190,36 +200,42 @@ func createNoteHandler(d *Deps) func(context.Context, *sdkmcp.CallToolRequest, C
 
 // resolveParentID resolves the parent folder from either a direct ID or a name.
 func resolveParentID(d *Deps, parentID, folderName string) (string, error) {
+	id, _, err := resolveParentIDWithTitle(d, parentID, folderName)
+	return id, err
+}
+
+// resolveParentIDWithTitle returns (folderID, folderTitle, error).
+func resolveParentIDWithTitle(d *Deps, parentID, folderName string) (string, string, error) {
 	if parentID != "" && folderName != "" {
-		return "", fmt.Errorf("pass parent_id or folder_name, not both")
+		return "", "", fmt.Errorf("pass parent_id or folder_name, not both")
 	}
 
 	if folderName != "" {
 		folder, err := d.DB.GetFolderByTitle(folderName)
 		if err != nil {
-			return "", fmt.Errorf("lookup folder by name %q: %w", folderName, err)
+			return "", "", fmt.Errorf("lookup folder by name %q: %w", folderName, err)
 		}
 		if folder == nil {
-			return "", fmt.Errorf("folder not found: %q (use list_folders to see available folders)", folderName)
+			return "", "", fmt.Errorf("folder not found: %q (use list_folders to see available folders)", folderName)
 		}
-		return folder.ID, nil
+		return folder.ID, folder.Title, nil
 	}
 
 	if parentID != "" {
 		folder, err := d.DB.GetFolder(parentID)
 		if err != nil {
-			return "", fmt.Errorf("lookup folder %q: %w", parentID, err)
+			return "", "", fmt.Errorf("lookup folder %q: %w", parentID, err)
 		}
 		if folder == nil {
-			return "", fmt.Errorf("folder not found: %q (use list_folders to see available folder IDs)", parentID)
+			return "", "", fmt.Errorf("folder not found: %q (use list_folders to see available folder IDs)", parentID)
 		}
-		return folder.ID, nil
+		return folder.ID, folder.Title, nil
 	}
 
-	return "", nil
+	return "", "", nil
 }
 
-// resolveTagIDs resolves tags from IDs and/or names, creating tags that don't exist by name.
+// resolveTagIDs resolves tags from IDs and/or names, creating tags that don't exist by name if policy allows.
 func resolveTagIDs(d *Deps, tagIDs, tagNames []string) ([]string, error) {
 	seen := make(map[string]bool)
 	var resolved []string
@@ -235,6 +251,9 @@ func resolveTagIDs(d *Deps, tagIDs, tagNames []string) ([]string, error) {
 		if tag == nil {
 			return nil, fmt.Errorf("tag not found: %q (use list_tags to see available tag IDs)", id)
 		}
+		if d.Policy == nil || !d.Policy.CanAttachTag(tag.ID, tag.Title) {
+			return nil, fmt.Errorf("tag %q not in writable list (use get_capabilities; or set GOJOPLIN_MCP_ALLOW_TAGS=* to allow all)", tag.Title)
+		}
 		seen[id] = true
 		resolved = append(resolved, id)
 	}
@@ -248,10 +267,16 @@ func resolveTagIDs(d *Deps, tagIDs, tagNames []string) ([]string, error) {
 			return nil, fmt.Errorf("lookup tag by name %q: %w", name, err)
 		}
 		if tag == nil {
+			if d.Policy == nil || !d.Policy.CanCreateTag() {
+				return nil, fmt.Errorf("tag creation disabled: cannot create tag %q (set GOJOPLIN_MCP_ALLOW_CREATE_TAG=true to allow)", name)
+			}
 			tag = &models.Tag{Title: name}
 			if err := d.DB.CreateTag(tag); err != nil {
 				return nil, fmt.Errorf("create tag %q: %w", name, err)
 			}
+		}
+		if d.Policy == nil || !d.Policy.CanAttachTag(tag.ID, tag.Title) {
+			return nil, fmt.Errorf("tag %q not in writable list (use get_capabilities; or set GOJOPLIN_MCP_ALLOW_TAGS=* to allow all)", tag.Title)
 		}
 		if !seen[tag.ID] {
 			seen[tag.ID] = true
@@ -270,6 +295,15 @@ func updateNoteHandler(d *Deps) func(context.Context, *sdkmcp.CallToolRequest, U
 		note, err := d.DB.GetNote(in.NoteID)
 		if err != nil || note == nil {
 			return nil, nil, fmt.Errorf("note not found: %s", in.NoteID)
+		}
+		var folderTitle string
+		if note.ParentID != "" {
+			if f, _ := d.DB.GetFolder(note.ParentID); f != nil {
+				folderTitle = f.Title
+			}
+		}
+		if d.Policy == nil || !d.Policy.CanUpdateNoteInFolder(note.ParentID, folderTitle) {
+			return nil, nil, fmt.Errorf("note's folder is read-only (use get_capabilities to see writable folders)")
 		}
 		if in.Title != "" {
 			note.Title = in.Title
@@ -334,6 +368,9 @@ func createFolderHandler(d *Deps) func(context.Context, *sdkmcp.CallToolRequest,
 	return func(ctx context.Context, req *sdkmcp.CallToolRequest, in CreateFolderIn) (*sdkmcp.CallToolResult, any, error) {
 		if in.Title == "" {
 			return nil, nil, fmt.Errorf("title is required")
+		}
+		if d.Policy == nil || !d.Policy.CanCreateFolder() {
+			return nil, nil, fmt.Errorf("folder creation disabled (set GOJOPLIN_MCP_ALLOW_CREATE_FOLDER=true to allow)")
 		}
 		folder := &models.Folder{Title: in.Title, ParentID: in.ParentID}
 		if err := d.DB.CreateFolder(folder); err != nil {
@@ -400,6 +437,24 @@ func triggerSyncHandler(d *Deps) func(context.Context, *sdkmcp.CallToolRequest, 
 			d.Syncer.TriggerSync()
 		}
 		return nil, map[string]any{"status": "triggered"}, nil
+	}
+}
+
+func getCapabilitiesHandler(d *Deps) func(context.Context, *sdkmcp.CallToolRequest, GetCapabilitiesIn) (*sdkmcp.CallToolResult, any, error) {
+	return func(ctx context.Context, req *sdkmcp.CallToolRequest, in GetCapabilitiesIn) (*sdkmcp.CallToolResult, any, error) {
+		policy := d.Policy
+		if policy == nil {
+			policy = NewPolicy(nil) // empty policy = all read-only
+		}
+		raw, err := policy.CapabilitiesJSON(d.DB)
+		if err != nil {
+			return nil, nil, err
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			return nil, nil, err
+		}
+		return nil, doc, nil
 	}
 }
 

@@ -1,0 +1,67 @@
+# Go-Joplin / Joplingo server configuration (example).
+# Copy to config.yaml and set the required environment variables (see README).
+# Do not commit secrets to this file; use env vars with ${VAR} expansion.
+#
+# Environment variables (all optional override config file):
+#   GOJOPLIN_CONFIG_PATH       Config file path (if not using --config).
+#   GOJOPLIN_USERNAME         Joplin Server username (sync target 9).
+#   GOJOPLIN_PASSWORD         Joplin Server password (sync target 9).
+#   GOJOPLIN_API_TOKEN        Clipper API token (legacy).
+#   GOJOPLIN_API_KEY          Clipper API key (required for serve).
+#   GOJOPLIN_MASTER_PASSWORD  E2EE master password for decrypting notes.
+#   GOJOPLIN_DATA_DIR         Data directory (default: ~/.local/share/gojoplin).
+#   GOJOPLIN_PORT             Clipper listen port (default: 41184).
+#   GOJOPLIN_LISTEN_HOST      Clipper bind host (default: localhost).
+#   AWS_ACCESS_KEY_ID        S3 access key (sync target 8).
+#   AWS_SECRET_ACCESS_KEY    S3 secret key (sync target 8).
+#   OTEL_EXPORTER_OTLP_ENDPOINT  OTLP tracing endpoint.
+#   GOJOPLIN_TRACING_*       Override tracing settings.
+#   GOJOPLIN_METRICS_*       Override metrics settings.
+#   GOJOPLIN_MCP_ALLOW_*     Override MCP allow-list.
+
+sync:
+  # Required. 8 = S3, 9 = Joplin Server
+  target: 8
+
+  # Required when target is 8. Credentials from env: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+  s3:
+    bucket: "notes"
+    url: "https://s3.example.com"
+    region: "us-west-2"
+    force_path_style: true
+
+  # Required when target is 9. Username/password from env: GOJOPLIN_USERNAME, GOJOPLIN_PASSWORD
+  joplin_server:
+    url: ""
+
+# API and auth. Use ${VAR} so values come from env; do not put secrets inline.
+api:
+  token: "${GOJOPLIN_API_TOKEN}"
+  key: "${GOJOPLIN_API_KEY}"
+  # Optional. E2EE master password for decrypting synced notes (env: GOJOPLIN_MASTER_PASSWORD)
+  master_password: "${GOJOPLIN_MASTER_PASSWORD}"
+
+# Server / clipper
+server:
+  data_dir: ""       # Default: GOJOPLIN_DATA_DIR or ~/.local/share/gojoplin
+  port: 41184        # Overridable by GOJOPLIN_PORT
+  listen_host: ""    # Default: localhost; use "0.0.0.0" to bind all interfaces (GOJOPLIN_LISTEN_HOST)
+
+# Observability
+observability:
+  tracing:
+    enabled: true
+    protocol: "http"   # or "grpc"
+    endpoint: "${OTEL_EXPORTER_OTLP_ENDPOINT}"
+    service_name: "go-joplin"
+    sample_rate: 1.0
+  metrics:
+    enabled: true
+    prometheus_port: 9091
+
+# MCP mutation allow-list (read-only by default). Overridable by GOJOPLIN_MCP_ALLOW_* env vars.
+mcp:
+  allow_folders: ""        # Comma-separated folder IDs or titles; "*" = all
+  allow_tags: ""           # Comma-separated tag IDs or titles; "*" = all
+  allow_create_tag: false
+  allow_create_folder: false

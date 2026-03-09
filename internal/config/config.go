@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 )
 
 // TracingConfig holds OpenTelemetry tracing configuration.
@@ -80,6 +78,13 @@ type Config struct {
 
 	// Observability (tracing + metrics). Filled from env in Load().
 	Observability ObservabilityConfig `json:"-"`
+
+	// MCP / Clipper mutation allow-list. By default all mutations are read-only.
+	// Use "*" to allow all mutations for that category.
+	MCPAllowFolders      string `json:"-"` // comma-separated folder IDs or titles; "*" = all
+	MCPAllowTags         string `json:"-"` // comma-separated tag IDs or titles; "*" = all
+	MCPAllowCreateTag    bool   `json:"-"` // allow creating new tags
+	MCPAllowCreateFolder bool   `json:"-"` // allow creating new folders
 }
 
 // ListenAddr returns the address the clipper server should listen on.
@@ -103,8 +108,9 @@ type Overrides struct {
 	MasterPassword string
 }
 
-// Load reads the Joplin settings file and returns a Config.
+// Load reads the config file and returns a Config.
 // If cfgPath is empty, it defaults to ~/.config/joplin-desktop/settings.json.
+// If the path has a .yaml or .yml extension, the native YAML config format is used; otherwise Joplin settings.json (JSON) is expected.
 // Precedence: env vars > CLI flags (via overrides) > config file.
 func Load(cfgPath string, overrides ...Overrides) (*Config, error) {
 	if cfgPath == "" {
@@ -115,7 +121,13 @@ func Load(cfgPath string, overrides ...Overrides) (*Config, error) {
 			if err != nil {
 				return nil, fmt.Errorf("cannot determine home directory: %w", err)
 			}
-			cfgPath = filepath.Join(home, ".config", "joplin-desktop", "settings.json")
+			// Prefer go-joplin YAML if present, else Joplin desktop settings
+			yamlPath := filepath.Join(home, ".config", "go-joplin", "config.yaml")
+			if _, err := os.Stat(yamlPath); err == nil {
+				cfgPath = yamlPath
+			} else {
+				cfgPath = filepath.Join(home, ".config", "joplin-desktop", "settings.json")
+			}
 		}
 	}
 
@@ -124,13 +136,38 @@ func Load(cfgPath string, overrides ...Overrides) (*Config, error) {
 		return nil, fmt.Errorf("cannot read config file %s: %w", cfgPath, err)
 	}
 
-	// Joplin settings.json uses flat dotted keys
+	var cfg *Config
+	if isYAMLConfig(cfgPath) {
+		cfg, err = loadFromYAML(data)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		cfg, err = loadFromJoplinJSON(data)
+		if err != nil {
+			return nil, err
+		}
+		cfg.Observability = DefaultObservability()
+	}
+
+	o := Overrides{}
+	if len(overrides) > 0 {
+		o = overrides[0]
+	}
+	applyOverridesAndEnv(cfg, o)
+	if err := validateConfig(cfg); err != nil {
+		return nil, err
+	}
+	applyRuntimeDefaults(cfg)
+	return cfg, nil
+}
+
+// loadFromJoplinJSON parses data as Joplin settings.json (flat dotted keys) and returns a Config.
+func loadFromJoplinJSON(data []byte) (*Config, error) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("cannot parse config file: %w", err)
 	}
-
-	cfg := &Config{}
 
 	getString := func(key string) string {
 		v, ok := raw[key]
@@ -143,7 +180,6 @@ func Load(cfgPath string, overrides ...Overrides) (*Config, error) {
 		}
 		return s
 	}
-
 	getInt := func(key string) int {
 		v, ok := raw[key]
 		if !ok {
@@ -155,7 +191,6 @@ func Load(cfgPath string, overrides ...Overrides) (*Config, error) {
 		}
 		return n
 	}
-
 	getBool := func(key string) bool {
 		v, ok := raw[key]
 		if !ok {
@@ -168,6 +203,7 @@ func Load(cfgPath string, overrides ...Overrides) (*Config, error) {
 		return b
 	}
 
+	cfg := &Config{}
 	cfg.SyncTarget = getInt("sync.target")
 	cfg.ServerURL = getString("sync.9.path")
 	cfg.Username = getString("sync.9.username")
@@ -179,104 +215,5 @@ func Load(cfgPath string, overrides ...Overrides) (*Config, error) {
 	cfg.S3SecretKey = getString("sync.8.password")
 	cfg.S3ForcePathStyle = getBool("sync.8.forcePathStyle")
 	cfg.APIToken = getString("api.token")
-
-	// Apply CLI flag overrides
-	if len(overrides) > 0 {
-		o := overrides[0]
-		if o.Username != "" {
-			cfg.Username = o.Username
-		}
-		if o.Password != "" {
-			cfg.Password = o.Password
-		}
-		if o.APIKey != "" {
-			cfg.APIKey = o.APIKey
-		}
-		if o.MasterPassword != "" {
-			cfg.MasterPassword = o.MasterPassword
-		}
-	}
-
-	// Env vars have highest precedence
-	if v := os.Getenv("GOJOPLIN_USERNAME"); v != "" {
-		cfg.Username = v
-	}
-	if v := os.Getenv("GOJOPLIN_PASSWORD"); v != "" {
-		cfg.Password = v
-	}
-	if v := os.Getenv("GOJOPLIN_API_KEY"); v != "" {
-		cfg.APIKey = v
-	}
-	if v := os.Getenv("GOJOPLIN_MASTER_PASSWORD"); v != "" {
-		cfg.MasterPassword = v
-	}
-
-	if cfg.SyncTarget != 8 && cfg.SyncTarget != 9 {
-		return nil, fmt.Errorf("unsupported sync target %d (only S3 target 8 and Joplin Server target 9 are supported)", cfg.SyncTarget)
-	}
-
-	if cfg.SyncTarget == 9 {
-		if cfg.ServerURL == "" {
-			return nil, fmt.Errorf("sync.9.path (server URL) is required for Joplin Server")
-		}
-	}
-	if cfg.SyncTarget == 8 {
-		if cfg.S3Bucket == "" {
-			return nil, fmt.Errorf("sync.8.path (S3 bucket name) is required for S3 sync")
-		}
-		// S3 credentials: env overrides; else sync.8.username / sync.8.password from config (Joplin-style)
-		hasEnvKey := os.Getenv("AWS_ACCESS_KEY_ID") != "" || os.Getenv("ACCESS_KEY_ID") != ""
-		hasEnvSecret := os.Getenv("AWS_SECRET_ACCESS_KEY") != "" || os.Getenv("SECRET_ACCESS_KEY") != ""
-		hasConfigKey := cfg.S3AccessKey != ""
-		hasConfigSecret := cfg.S3SecretKey != ""
-		if !(hasEnvKey || hasConfigKey) || !(hasEnvSecret || hasConfigSecret) {
-			return nil, fmt.Errorf("S3 credentials required: set env vars (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) and/or sync.8.username and sync.8.password in config")
-		}
-	}
-
-	// Data directory
-	cfg.DataDir = os.Getenv("GOJOPLIN_DATA_DIR")
-	if cfg.DataDir == "" {
-		home, _ := os.UserHomeDir()
-		cfg.DataDir = filepath.Join(home, ".local", "share", "gojoplin")
-	}
-
-	// Port override
-	if portStr := os.Getenv("GOJOPLIN_PORT"); portStr != "" {
-		fmt.Sscanf(portStr, "%d", &cfg.Port)
-	}
-	// Bind address host (default: localhost); use 0.0.0.0 to listen on all interfaces
-	if v := os.Getenv("GOJOPLIN_LISTEN_HOST"); v != "" {
-		cfg.ListenHost = v
-	}
-
-	// Observability: defaults then env overrides
-	cfg.Observability = DefaultObservability()
-	if v := os.Getenv("GOJOPLIN_TRACING_ENABLED"); v != "" {
-		cfg.Observability.Tracing.Enabled = strings.EqualFold(v, "true") || v == "1"
-	}
-	if v := os.Getenv("GOJOPLIN_TRACING_PROTOCOL"); v != "" {
-		cfg.Observability.Tracing.Protocol = v
-	}
-	if v := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); v != "" {
-		cfg.Observability.Tracing.Endpoint = ExpandEnv(v)
-	}
-	if v := os.Getenv("GOJOPLIN_TRACING_SERVICE_NAME"); v != "" {
-		cfg.Observability.Tracing.ServiceName = v
-	}
-	if v := os.Getenv("GOJOPLIN_TRACING_SAMPLE_RATE"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			cfg.Observability.Tracing.SampleRate = f
-		}
-	}
-	if v := os.Getenv("GOJOPLIN_METRICS_ENABLED"); v != "" {
-		cfg.Observability.Metrics.Enabled = strings.EqualFold(v, "true") || v == "1"
-	}
-	if v := os.Getenv("GOJOPLIN_METRICS_PROMETHEUS_PORT"); v != "" {
-		if p, err := strconv.Atoi(v); err == nil {
-			cfg.Observability.Metrics.PrometheusPort = p
-		}
-	}
-
 	return cfg, nil
 }

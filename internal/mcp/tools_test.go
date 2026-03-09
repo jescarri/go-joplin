@@ -5,12 +5,30 @@ import (
 	"os"
 	"testing"
 
+	"github.com/jescarri/go-joplin/internal/config"
 	"github.com/jescarri/go-joplin/internal/models"
 	"github.com/jescarri/go-joplin/internal/store"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func testDeps(t *testing.T) *Deps {
+	t.Helper()
+	return testDepsWithPolicy(t, nil)
+}
+
+// testDepsPermissive returns Deps with wildcard policy (allow all mutations).
+func testDepsPermissive(t *testing.T) *Deps {
+	t.Helper()
+	cfg := &config.Config{
+		MCPAllowFolders:      "*",
+		MCPAllowTags:         "*",
+		MCPAllowCreateTag:    true,
+		MCPAllowCreateFolder: true,
+	}
+	return testDepsWithPolicy(t, NewPolicy(cfg))
+}
+
+func testDepsWithPolicy(t *testing.T, policy *Policy) *Deps {
 	t.Helper()
 	dir := t.TempDir()
 	db, err := store.Open(dir)
@@ -21,7 +39,7 @@ func testDeps(t *testing.T) *Deps {
 		db.Close()
 		os.RemoveAll(dir)
 	})
-	return &Deps{DB: db}
+	return &Deps{DB: db, Policy: policy}
 }
 
 func TestResolveParentID_ByID(t *testing.T) {
@@ -108,7 +126,7 @@ func TestResolveParentID_Empty(t *testing.T) {
 }
 
 func TestResolveTagIDs_ByIDs(t *testing.T) {
-	d := testDeps(t)
+	d := testDepsPermissive(t)
 
 	tag := &models.Tag{Title: "maintenance"}
 	if err := d.DB.CreateTag(tag); err != nil {
@@ -125,7 +143,7 @@ func TestResolveTagIDs_ByIDs(t *testing.T) {
 }
 
 func TestResolveTagIDs_ByNames_Existing(t *testing.T) {
-	d := testDeps(t)
+	d := testDepsPermissive(t)
 
 	tag := &models.Tag{Title: "cleaning"}
 	if err := d.DB.CreateTag(tag); err != nil {
@@ -142,7 +160,7 @@ func TestResolveTagIDs_ByNames_Existing(t *testing.T) {
 }
 
 func TestResolveTagIDs_ByNames_AutoCreates(t *testing.T) {
-	d := testDeps(t)
+	d := testDepsPermissive(t)
 
 	got, err := resolveTagIDs(d, nil, []string{"newtag"})
 	if err != nil {
@@ -174,7 +192,7 @@ func TestResolveTagIDs_InvalidID(t *testing.T) {
 }
 
 func TestResolveTagIDs_Deduplicates(t *testing.T) {
-	d := testDeps(t)
+	d := testDepsPermissive(t)
 
 	tag := &models.Tag{Title: "todo"}
 	if err := d.DB.CreateTag(tag); err != nil {
@@ -191,7 +209,7 @@ func TestResolveTagIDs_Deduplicates(t *testing.T) {
 }
 
 func TestCreateNoteHandler_WithFolderNameAndTagNames(t *testing.T) {
-	d := testDeps(t)
+	d := testDepsPermissive(t)
 
 	folder := &models.Folder{Title: "Homelab"}
 	if err := d.DB.CreateFolder(folder); err != nil {
@@ -274,7 +292,7 @@ func TestCreateNoteHandler_InvalidParentID(t *testing.T) {
 }
 
 func TestCreateNoteHandler_NoFolder(t *testing.T) {
-	d := testDeps(t)
+	d := testDepsPermissive(t)
 
 	handler := createNoteHandler(d)
 	in := CreateNoteIn{
@@ -290,5 +308,69 @@ func TestCreateNoteHandler_NoFolder(t *testing.T) {
 	note := result.(*models.Note)
 	if note.ParentID != "" {
 		t.Errorf("note.ParentID = %q, want empty", note.ParentID)
+	}
+}
+
+func TestCreateNoteHandler_DeniedByPolicy(t *testing.T) {
+	d := testDeps(t) // nil policy = read-only
+	folder := &models.Folder{Title: "Homelab"}
+	if err := d.DB.CreateFolder(folder); err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+
+	handler := createNoteHandler(d)
+	in := CreateNoteIn{
+		Title:      "Test",
+		FolderName: "Homelab",
+	}
+
+	_, _, err := handler(context.Background(), &sdkmcp.CallToolRequest{}, in)
+	if err == nil {
+		t.Fatal("expected error when policy denies folder")
+	}
+}
+
+func TestCreateFolderHandler_DeniedByPolicy(t *testing.T) {
+	d := testDeps(t)
+
+	handler := createFolderHandler(d)
+	in := CreateFolderIn{Title: "New Folder"}
+
+	_, _, err := handler(context.Background(), &sdkmcp.CallToolRequest{}, in)
+	if err == nil {
+		t.Fatal("expected error when policy denies folder creation")
+	}
+}
+
+func TestResolveTagIDs_DeniedWhenPolicyRestricts(t *testing.T) {
+	d := testDeps(t) // nil policy
+	tag := &models.Tag{Title: "work"}
+	if err := d.DB.CreateTag(tag); err != nil {
+		t.Fatalf("CreateTag: %v", err)
+	}
+
+	_, err := resolveTagIDs(d, []string{tag.ID}, nil)
+	if err == nil {
+		t.Fatal("expected error when policy restricts tag")
+	}
+}
+
+func TestGetCapabilitiesHandler(t *testing.T) {
+	d := testDepsPermissive(t)
+
+	handler := getCapabilitiesHandler(d)
+	_, result, err := handler(context.Background(), &sdkmcp.CallToolRequest{}, GetCapabilitiesIn{})
+	if err != nil {
+		t.Fatalf("getCapabilitiesHandler: %v", err)
+	}
+	doc, ok := result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type = %T, want map[string]any", result)
+	}
+	if doc["folders"] == nil {
+		t.Error("capabilities should include folders")
+	}
+	if doc["tags"] == nil {
+		t.Error("capabilities should include tags")
 	}
 }

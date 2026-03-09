@@ -6,6 +6,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/jescarri/go-joplin/internal/mcp"
 	"github.com/jescarri/go-joplin/internal/store"
 	"github.com/jescarri/go-joplin/internal/telemetry"
 )
@@ -17,23 +18,26 @@ type SyncTrigger interface {
 
 // Server is the Joplin Clipper REST API server.
 type Server struct {
-	db        *store.DB
-	apiToken  string
-	apiKey    string
-	router    chi.Router
-	syncer    SyncTrigger
-	mcpHandler http.Handler // optional MCP SSE handler, mounted at /mcp
+	db         *store.DB
+	apiToken   string
+	apiKey     string
+	router     chi.Router
+	syncer     SyncTrigger
+	policy     *mcp.Policy // nil = all mutations denied
+	mcpHandler http.Handler
 }
 
 // NewServer creates a new clipper server.
 // syncer may be nil if no sync trigger is desired.
+// policy may be nil; if nil, all mutations are denied (read-only).
 // mcpHandler may be nil; if set, it is mounted at /mcp (Bearer auth applied).
-func NewServer(db *store.DB, apiToken string, apiKey string, syncer SyncTrigger, mcpHandler http.Handler) *Server {
+func NewServer(db *store.DB, apiToken string, apiKey string, syncer SyncTrigger, policy *mcp.Policy, mcpHandler http.Handler) *Server {
 	s := &Server{
 		db:         db,
 		apiToken:   apiToken,
 		apiKey:     apiKey,
 		syncer:     syncer,
+		policy:     policy,
 		mcpHandler: mcpHandler,
 	}
 	s.buildRouter()

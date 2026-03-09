@@ -9,9 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Native YAML config**
+  - Optional config file format (`.yaml`/`.yml`) so the service can run without Joplin desktop settings. Use `--config config.yaml` or `GOJOPLIN_CONFIG_PATH=config.yaml`.
+  - Secrets are not stored in the YAML file; use environment variables. API token and key support `${VAR}` expansion in the file (e.g. `api.token: "${GOJOPLIN_API_TOKEN}"`).
+  - S3 credentials when using YAML are read from `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (or `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`). Joplin Server credentials from `GOJOPLIN_USERNAME` and `GOJOPLIN_PASSWORD`.
+  - Example file: `config.yaml.example`. Config path resolution: if the path has a `.yaml` or `.yml` extension, the YAML loader is used; otherwise Joplin `settings.json` (JSON) is expected.
+
+- **Environment variables (documented)**
+  - **Required (secrets):** `GOJOPLIN_API_TOKEN` (Web Clipper token), `GOJOPLIN_API_KEY` (Bearer for clipper/MCP), `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (S3), `GOJOPLIN_USERNAME`/`GOJOPLIN_PASSWORD` (Joplin Server). Documented in README with a “Required (secrets)” and “Optional (overrides and runtime)” table.
+  - README now lists all supported env vars and when each is required.
+
+- **MCP / Clipper mutation allow-list**
+  - Allow-list mechanism for restricting mutations (create/update notes, folders, tags).
+  - Environment variables: `GOJOPLIN_MCP_ALLOW_FOLDERS`, `GOJOPLIN_MCP_ALLOW_TAGS`, `GOJOPLIN_MCP_ALLOW_CREATE_TAG`, `GOJOPLIN_MCP_ALLOW_CREATE_FOLDER`.
+  - Use `*` to allow all mutations for folders or tags.
+  - By default all mutations are denied (read-only). Configure allow-lists to permit writes.
+  - MCP resource `joplingo://capabilities` and tool `get_capabilities` expose capabilities to LLMs (which folders/tags are read-write vs read-only).
+  - Clipper REST API enforces the same policy for notes, folders, and tags.
+
 - **MCP (Model Context Protocol)**  
   - SSE endpoint at `/mcp` with Bearer token authentication.  
-  - Tools: `list_notes`, `get_note`, `create_note`, `update_note`, `search_notes`, `list_folders`, `get_folder`, `create_folder`, `list_tags`, `get_note_tags`, `list_resources`, `trigger_sync`.  
+  - Tools: `list_notes`, `get_note`, `create_note`, `update_note`, `search_notes`, `list_folders`, `get_folder`, `create_folder`, `list_tags`, `get_note_tags`, `list_resources`, `trigger_sync`, `get_capabilities`.  
   - Tool registration and handlers in `internal/mcp` (easy to extend).
 
 - **Observability**  

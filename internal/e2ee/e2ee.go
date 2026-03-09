@@ -126,7 +126,11 @@ func modernDecryptMasterKey(password string, encryptedContent string) ([]byte, e
 	}
 
 	derivedKey := pbkdf2.Key([]byte(password), salt, 220000, 32, sha512.New)
-	return decryptAESGCM(derivedKey, iv, ct)
+	rawBytes, err := decryptAESGCM(derivedKey, iv, ct)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(hex.EncodeToString(rawBytes)), nil
 }
 
 // sjclDecrypt decrypts content encrypted by the sjcl library (AES-CCM).
@@ -391,7 +395,7 @@ func utf8ToUTF16LE(s string) []byte {
 
 // encryptChunk encrypts a single chunk with PBKDF2(iterations) + AES-256-GCM, returns JSON cipher packet.
 func encryptChunk(masterKey, plaintext []byte, iterations int) ([]byte, error) {
-	salt := make([]byte, 16)
+	salt := make([]byte, 32)
 	if _, err := rand.Read(salt); err != nil {
 		return nil, err
 	}
