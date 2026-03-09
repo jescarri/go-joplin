@@ -14,13 +14,14 @@ const (
 	implementationVersion = "v1.0.0"
 )
 
-// NewServer creates an MCP server with all tools registered. Easy to modify: edit RegisterAll in tools.go.
+// NewServer creates an MCP server with all tools and resources registered.
 func NewServer(d *Deps) *Server {
 	server := sdkmcp.NewServer(&sdkmcp.Implementation{
 		Name:    implementationName,
 		Version: implementationVersion,
 	}, nil)
 	RegisterAll(server, d)
+	RegisterResources(server, d)
 	return server
 }
 

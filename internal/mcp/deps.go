@@ -13,4 +13,5 @@ type SyncTrigger interface {
 type Deps struct {
 	DB     *store.DB
 	Syncer SyncTrigger
+	Policy *Policy // nil = all mutations denied (read-only)
 }

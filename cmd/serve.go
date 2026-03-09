@@ -26,6 +26,12 @@ var serveCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		if cfg.APIToken == "" {
+			return fmt.Errorf("api token is required: set api.token in config (e.g. ${GOJOPLIN_API_TOKEN}) or GOJOPLIN_API_TOKEN env var")
+		}
+		if cfg.APIKey == "" {
+			return fmt.Errorf("api key is required: set api.key in config (e.g. ${GOJOPLIN_API_KEY}) or GOJOPLIN_API_KEY env var")
+		}
 
 		ctx := context.Background()
 		if cfg.Observability.Tracing.Enabled {
@@ -101,17 +107,14 @@ var serveCmd = &cobra.Command{
 			}
 		}()
 
-		if cfg.APIKey == "" {
-			return fmt.Errorf("--api-key flag or GOJOPLIN_API_KEY env var is required")
-		}
-
+		policy := mcp.NewPolicy(cfg)
 		var mcpHandler http.Handler
 		{
-			mcpDeps := &mcp.Deps{DB: db, Syncer: engine}
+			mcpDeps := &mcp.Deps{DB: db, Syncer: engine, Policy: policy}
 			mcpServer := mcp.NewServer(mcpDeps)
 			mcpHandler = mcp.NewSSEHandler(func(r *http.Request) *mcp.Server { return mcpServer })
 		}
-		srv := clipper.NewServer(db, cfg.APIToken, cfg.APIKey, engine, mcpHandler)
+		srv := clipper.NewServer(db, cfg.APIToken, cfg.APIKey, engine, policy, mcpHandler)
 		addr := cfg.ListenAddr()
 		slog.Info("starting clipper server", "addr", addr)
 

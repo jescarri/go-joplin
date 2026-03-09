@@ -38,6 +38,10 @@ func (s *Server) handleGetTag(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateTag(w http.ResponseWriter, r *http.Request) {
+	if s.policy == nil || !s.policy.CanCreateTag() {
+		writeError(w, http.StatusForbidden, "tag creation disabled: set GOJOPLIN_MCP_ALLOW_CREATE_TAG=true")
+		return
+	}
 	var tag models.Tag
 	if err := json.NewDecoder(r.Body).Decode(&tag); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
@@ -65,6 +69,10 @@ func (s *Server) handleUpdateTag(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
+	if s.policy == nil || !s.policy.CanAttachTag(existing.ID, existing.Title) {
+		writeError(w, http.StatusForbidden, "tag is read-only")
+		return
+	}
 
 	var updates map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
@@ -90,6 +98,11 @@ func (s *Server) handleUpdateTag(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteTag(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	tag, _ := s.db.GetTag(id)
+	if tag != nil && (s.policy == nil || !s.policy.CanAttachTag(tag.ID, tag.Title)) {
+		writeError(w, http.StatusForbidden, "tag is read-only")
+		return
+	}
 	if err := s.db.DeleteTag(id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -128,6 +141,15 @@ func (s *Server) handleAddTagNote(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "note id is required")
 		return
 	}
+	tag, _ := s.db.GetTag(tagID)
+	if tag == nil {
+		writeError(w, http.StatusNotFound, "tag not found")
+		return
+	}
+	if s.policy == nil || !s.policy.CanAttachTag(tag.ID, tag.Title) {
+		writeError(w, http.StatusForbidden, "tag is read-only")
+		return
+	}
 
 	if err := s.db.AddNoteTag(body.ID, tagID); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -141,6 +163,11 @@ func (s *Server) handleAddTagNote(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRemoveTagNote(w http.ResponseWriter, r *http.Request) {
 	tagID := chi.URLParam(r, "id")
 	noteID := chi.URLParam(r, "noteId")
+	tag, _ := s.db.GetTag(tagID)
+	if tag != nil && (s.policy == nil || !s.policy.CanAttachTag(tag.ID, tag.Title)) {
+		writeError(w, http.StatusForbidden, "tag is read-only")
+		return
+	}
 
 	if err := s.db.RemoveNoteTag(noteID, tagID); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

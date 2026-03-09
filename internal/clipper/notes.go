@@ -51,6 +51,38 @@ func (s *Server) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 	}
 	note := &req.Note
 
+	if s.policy != nil {
+		var folderTitle string
+		if note.ParentID != "" {
+			if f, _ := s.db.GetFolder(note.ParentID); f != nil {
+				folderTitle = f.Title
+			}
+		}
+		if !s.policy.CanCreateNoteInFolderOrEmpty(note.ParentID, folderTitle) {
+			writeError(w, http.StatusForbidden, "folder is read-only: create notes only in writable folders")
+			return
+		}
+	} else {
+		writeError(w, http.StatusForbidden, "folder is read-only: configure GOJOPLIN_MCP_ALLOW_FOLDERS to allow mutations")
+		return
+	}
+
+	// Validate tag_ids against policy
+	for _, tagID := range req.TagIDs {
+		if tagID == "" {
+			continue
+		}
+		tag, _ := s.db.GetTag(tagID)
+		if tag == nil {
+			writeError(w, http.StatusBadRequest, "tag not found: "+tagID)
+			return
+		}
+		if !s.policy.CanAttachTag(tag.ID, tag.Title) {
+			writeError(w, http.StatusForbidden, "tag "+tag.Title+" not in writable list")
+			return
+		}
+	}
+
 	// Handle body_html conversion
 	if bodyHTML := getBodyHTML(r); bodyHTML != "" {
 		md, err := htmlToMarkdown(bodyHTML)
@@ -91,6 +123,22 @@ func (s *Server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
 	}
 	if existing == nil {
 		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+
+	if s.policy != nil {
+		var folderTitle string
+		if existing.ParentID != "" {
+			if f, _ := s.db.GetFolder(existing.ParentID); f != nil {
+				folderTitle = f.Title
+			}
+		}
+		if !s.policy.CanUpdateNoteInFolder(existing.ParentID, folderTitle) {
+			writeError(w, http.StatusForbidden, "note's folder is read-only")
+			return
+		}
+	} else {
+		writeError(w, http.StatusForbidden, "folder is read-only: configure GOJOPLIN_MCP_ALLOW_FOLDERS")
 		return
 	}
 
@@ -164,6 +212,22 @@ func (s *Server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteNote(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	note, _ := s.db.GetNote(id)
+	if note != nil && s.policy != nil {
+		var folderTitle string
+		if note.ParentID != "" {
+			if f, _ := s.db.GetFolder(note.ParentID); f != nil {
+				folderTitle = f.Title
+			}
+		}
+		if !s.policy.CanUpdateNoteInFolder(note.ParentID, folderTitle) {
+			writeError(w, http.StatusForbidden, "note's folder is read-only")
+			return
+		}
+	} else if note != nil && s.policy == nil {
+		writeError(w, http.StatusForbidden, "folder is read-only: configure GOJOPLIN_MCP_ALLOW_FOLDERS")
+		return
+	}
 	if err := s.db.DeleteNote(id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

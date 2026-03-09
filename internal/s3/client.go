@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -62,7 +63,8 @@ func NewClient(ctx context.Context, cfg Config) (*Client, error) {
 	}
 
 	if cfg.Endpoint != "" {
-		endpoint := cfg.Endpoint
+		// Normalize: strip trailing slash so path-style requests use /bucket, not //bucket
+		endpoint := strings.TrimSuffix(cfg.Endpoint, "/")
 		opts = append(opts, config.WithEndpointResolverWithOptions(aws.EndpointResolverWithOptionsFunc(
 			func(service, region string, options ...interface{}) (aws.Endpoint, error) {
 				return aws.Endpoint{
