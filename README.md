@@ -54,6 +54,7 @@ When running in Docker, **mount the Joplin config directory as read-only (`:ro`)
 |----------|-------------|
 | `GOJOPLIN_CONFIG_PATH` | Path to Joplin settings file (default: `~/.config/joplin-desktop/settings.json`) |
 | `GOJOPLIN_DATA_DIR` | Data directory for DB and resources (default: `~/.local/share/gojoplin`) |
+| `GOJOPLIN_LISTEN_HOST` | Clipper server bind address host (default: `localhost`; use `0.0.0.0` to listen on all interfaces) |
 | `GOJOPLIN_PORT` | Clipper server port (default: 41184) |
 | `GOJOPLIN_USERNAME` | Joplin Server username (overrides config) |
 | `GOJOPLIN_PASSWORD` | Joplin Server password (overrides config) |
@@ -125,6 +126,14 @@ docker run -d \
 - `/config:ro` — Joplin settings (sync targets, API token, etc.) mounted **read-only**
 - `/data` — Writable volume for the local SQLite DB and resources
 
+## Releases and CI
+
+- **Branches and PRs**: CI runs tests and build (and validates the Dockerfile); no image is pushed.
+- **Main branch**: On every push to `main`, the workflow runs tests, [semantic-release](https://github.com/semantic-release/semantic-release) (which may create a new version and GitHub Release from [Conventional Commits](https://www.conventionalcommits.org/)), and pushes the container image to GitHub Container Registry as `latest` and `sha-<short-sha>`. If semantic-release publishes a new version (e.g. `v1.2.3`), that tag is also pushed to GHCR.
+- **Tag push (`v*`)**: Pushing a tag (e.g. `v1.0.0`) runs tests and pushes the image with that tag to GHCR.
+
+Configuration for semantic-release is in [.releaserc.json](.releaserc.json).
+
 ## Project layout
 
 - `cmd/`: CLI commands (`serve`, `sync`, `config`, etc.)
@@ -137,6 +146,7 @@ docker run -d \
 - `internal/telemetry`: OpenTelemetry tracer provider, Prometheus registry and request-duration histogram.
 - `internal/e2ee`, `internal/models`: E2EE and shared models (E2EE calls traced).
 - `docs/prometheus-recording-rules.yaml`: Example recording rules for p99/p95/p50 of API latency.
+
 
 ## License
 

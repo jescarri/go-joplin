@@ -76,6 +76,7 @@ type Config struct {
 	MasterPassword string `json:"-"`
 	DataDir        string `json:"-"`
 	Port           int    `json:"-"`
+	ListenHost     string `json:"-"` // bind address host (default: localhost)
 
 	// Observability (tracing + metrics). Filled from env in Load().
 	Observability ObservabilityConfig `json:"-"`
@@ -83,11 +84,15 @@ type Config struct {
 
 // ListenAddr returns the address the clipper server should listen on.
 func (c *Config) ListenAddr() string {
+	host := c.ListenHost
+	if host == "" {
+		host = "localhost"
+	}
 	port := c.Port
 	if port == 0 {
 		port = 41184
 	}
-	return fmt.Sprintf("localhost:%d", port)
+	return fmt.Sprintf("%s:%d", host, port)
 }
 
 // Overrides holds values from CLI flags that can override config file settings.
@@ -239,6 +244,10 @@ func Load(cfgPath string, overrides ...Overrides) (*Config, error) {
 	// Port override
 	if portStr := os.Getenv("GOJOPLIN_PORT"); portStr != "" {
 		fmt.Sscanf(portStr, "%d", &cfg.Port)
+	}
+	// Bind address host (default: localhost); use 0.0.0.0 to listen on all interfaces
+	if v := os.Getenv("GOJOPLIN_LISTEN_HOST"); v != "" {
+		cfg.ListenHost = v
 	}
 
 	// Observability: defaults then env overrides

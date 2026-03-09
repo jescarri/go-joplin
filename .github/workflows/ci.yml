@@ -1,9 +1,11 @@
-# CI: test, build, and push container on pull requests
+# CI: test and build on branches and pull requests (no image push)
 name: CI
 
 on:
   pull_request:
     branches: [main, master]
+  push:
+    branches-ignore: [main, master]
 
 env:
   REGISTRY: ghcr.io
@@ -38,45 +40,20 @@ jobs:
       - name: Build
         run: make build
 
+  # Validate Dockerfile builds (no push)
   docker:
     runs-on: ubuntu-latest
     needs: test
-    permissions:
-      contents: read
-      packages: write
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Get version tag
-        id: vars
-        run: |
-          short_sha=$(git rev-parse --short HEAD)
-          branch="${{ github.head_ref || github.ref_name }}"
-          tag=$(echo "$branch" | sed 's/\//-/g')-${short_sha}
-          echo "tag=${tag}" >> $GITHUB_OUTPUT
-
-      - name: Extract metadata and build
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/gojoplin
-          tags: |
-            type=raw,value=${{ steps.vars.outputs.tag }},enable=${{ true }}
-
-      - name: Build and push
+      - name: Build image (no push)
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          push: false
+          load: true
+          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/gojoplin:ci
