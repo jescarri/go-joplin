@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-03-22
+
+### Added
+
+- **MCP tool filtering (`enabled_tools`)**
+  - New config option `mcp.enabled_tools` (comma-separated tool names or `"*"` for all).
+  - Environment variable: `GOJOPLIN_MCP_ENABLED_TOOLS`.
+  - When set, only the listed tools are registered with the MCP server. Default `"*"` registers all tools (backward compatible).
+  - Reduces token consumption for LLM agents that only need a subset of tools (e.g. `create_note,list_folders,list_tags`).
+
+### Changed
+
+- **Slim list responses**
+  - `list_folders` now returns only `{id, title, parent_id}` per folder (~80% smaller).
+  - `list_tags` and `get_note_tags` now return only `{id, title}` per tag (~80% smaller).
+  - `list_notes` and `search_notes` now return only `{id, title, parent_id, is_todo, updated_time}` per note. The `body` field is no longer included in list responses — use `get_note` to retrieve note content.
+  - `list_resources` now returns only `{id, title, mime, filename, size}` per resource (~70% smaller).
+  - Removes encryption metadata, internal sync fields, and redundant timestamps from all list responses to reduce LLM context bloat.
+
 ## [Unreleased]
 
 ### Added

@@ -125,6 +125,7 @@ S3 credentials can also be provided as `ACCESS_KEY_ID` and `SECRET_ACCESS_KEY`. 
 | `GOJOPLIN_MCP_ALLOW_TAGS` | Comma-separated tag IDs or titles that can be attached to notes; use `*` to allow all. |
 | `GOJOPLIN_MCP_ALLOW_CREATE_TAG` | Allow creating new tags (default: false). |
 | `GOJOPLIN_MCP_ALLOW_CREATE_FOLDER` | Allow creating new folders (default: false). |
+| `GOJOPLIN_MCP_ENABLED_TOOLS` | Comma-separated tool names to register (default: `*` = all). Use to reduce token consumption for LLM agents. Example: `create_note,list_folders,list_tags,create_folder,search_notes`. |
 
 ### Native YAML config
 

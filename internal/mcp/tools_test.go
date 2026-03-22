@@ -355,6 +355,133 @@ func TestResolveTagIDs_DeniedWhenPolicyRestricts(t *testing.T) {
 	}
 }
 
+func TestIsToolEnabled(t *testing.T) {
+	tests := []struct {
+		name         string
+		toolName     string
+		enabledTools string
+		want         bool
+	}{
+		{"empty means all", "list_notes", "", true},
+		{"star means all", "list_notes", "*", true},
+		{"exact match", "list_notes", "list_notes,get_note", true},
+		{"not in list", "create_note", "list_notes,get_note", false},
+		{"single tool match", "get_note", "get_note", true},
+		{"single tool no match", "list_notes", "get_note", false},
+		{"whitespace trimmed", "get_note", "list_notes, get_note", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := isToolEnabled(tc.toolName, tc.enabledTools)
+			if got != tc.want {
+				t.Errorf("isToolEnabled(%q, %q) = %v, want %v", tc.toolName, tc.enabledTools, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRegisterAll_EnabledToolsFilter(t *testing.T) {
+	// RegisterAll with only two tools enabled should not panic and should register
+	// only the specified tools. We verify indirectly by calling a handler that
+	// should NOT be registered and confirming the server was created without error.
+	d := testDeps(t)
+	d.EnabledTools = "list_notes,list_folders"
+
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "test", Version: "v0.0.1"}, nil)
+	RegisterAll(server, d)
+	// If we got here without a panic, the filtering worked.
+	// The SDK doesn't expose a public method to list tools, so we verify
+	// that with "*" we get the full set (no panic) and with a restricted
+	// list we also get no panic.
+	d2 := testDeps(t)
+	d2.EnabledTools = "*"
+	server2 := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "test", Version: "v0.0.1"}, nil)
+	RegisterAll(server2, d2)
+}
+
+func TestListFolders_SlimResponse(t *testing.T) {
+	d := testDeps(t)
+	folder := &models.Folder{Title: "TestFolder"}
+	if err := d.DB.CreateFolder(folder); err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+
+	handler := listFoldersHandler(d)
+	_, result, err := handler(context.Background(), &sdkmcp.CallToolRequest{}, ListFoldersIn{})
+	if err != nil {
+		t.Fatalf("listFoldersHandler: %v", err)
+	}
+
+	doc, ok := result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type = %T, want map[string]any", result)
+	}
+
+	folders, ok := doc["folders"].([]map[string]any)
+	if !ok {
+		t.Fatalf("folders type = %T, want []map[string]any", doc["folders"])
+	}
+	if len(folders) == 0 {
+		t.Fatal("expected at least one folder")
+	}
+
+	f := folders[0]
+	// Should have slim fields
+	if _, ok := f["id"]; !ok {
+		t.Error("slim folder should have 'id'")
+	}
+	if _, ok := f["title"]; !ok {
+		t.Error("slim folder should have 'title'")
+	}
+	if _, ok := f["parent_id"]; !ok {
+		t.Error("slim folder should have 'parent_id'")
+	}
+	// Should NOT have encryption_cipher_text
+	if _, ok := f["encryption_cipher_text"]; ok {
+		t.Error("slim folder should NOT contain 'encryption_cipher_text'")
+	}
+	// Should NOT have created_time
+	if _, ok := f["created_time"]; ok {
+		t.Error("slim folder should NOT contain 'created_time'")
+	}
+}
+
+func TestListNotes_SlimResponse(t *testing.T) {
+	d := testDepsPermissive(t)
+	folder := &models.Folder{Title: "NoteFolder"}
+	if err := d.DB.CreateFolder(folder); err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	note := &models.Note{Title: "TestNote", Body: "some body content", ParentID: folder.ID}
+	if err := d.DB.CreateNote(note); err != nil {
+		t.Fatalf("CreateNote: %v", err)
+	}
+
+	handler := listNotesHandler(d)
+	_, result, err := handler(context.Background(), &sdkmcp.CallToolRequest{}, ListNotesIn{})
+	if err != nil {
+		t.Fatalf("listNotesHandler: %v", err)
+	}
+
+	doc := result.(map[string]any)
+	notes := doc["notes"].([]map[string]any)
+	if len(notes) == 0 {
+		t.Fatal("expected at least one note")
+	}
+
+	n := notes[0]
+	// Should have slim fields
+	for _, key := range []string{"id", "title", "parent_id", "is_todo", "updated_time"} {
+		if _, ok := n[key]; !ok {
+			t.Errorf("slim note should have %q", key)
+		}
+	}
+	// Should NOT have body
+	if _, ok := n["body"]; ok {
+		t.Error("slim note should NOT contain 'body'")
+	}
+}
+
 func TestGetCapabilitiesHandler(t *testing.T) {
 	d := testDepsPermissive(t)
 

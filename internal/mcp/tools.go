@@ -4,65 +4,109 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/jescarri/go-joplin/internal/models"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// isToolEnabled returns true if the tool should be registered given the enabledTools config.
+// enabledTools is "" or "*" for all tools, otherwise a comma-separated list of tool names.
+func isToolEnabled(name, enabledTools string) bool {
+	if enabledTools == "" || enabledTools == "*" {
+		return true
+	}
+	for _, t := range strings.Split(enabledTools, ",") {
+		if strings.TrimSpace(t) == name {
+			return true
+		}
+	}
+	return false
+}
+
 // RegisterAll registers all Joplin MCP tools on the server. Add new tools here to expose them.
+// Only tools matching d.EnabledTools are registered ("" or "*" means all).
 func RegisterAll(server *Server, d *Deps) {
-	sdkmcp.AddTool(server, &sdkmcp.Tool{
-		Name:        "list_notes",
-		Description: "List notes with optional folder and limit",
-	}, listNotesHandler(d))
-	sdkmcp.AddTool(server, &sdkmcp.Tool{
-		Name:        "get_note",
-		Description: "Get a note by ID",
-	}, getNoteHandler(d))
-	sdkmcp.AddTool(server, &sdkmcp.Tool{
-		Name:        "create_note",
-		Description: "Create a note. Pass title (required), optional body, optional folder placement via parent_id (folder ID) or folder_name (case-insensitive name), and optional tags via tags (list of tag IDs) or tag_names (list of tag names, auto-created if missing). Use folder_name and tag_names when you have names instead of IDs.",
-	}, createNoteHandler(d))
-	sdkmcp.AddTool(server, &sdkmcp.Tool{
-		Name:        "update_note",
-		Description: "Update note title or body",
-	}, updateNoteHandler(d))
-	sdkmcp.AddTool(server, &sdkmcp.Tool{
-		Name:        "search_notes",
-		Description: "Full-text search in notes",
-	}, searchNotesHandler(d))
-	sdkmcp.AddTool(server, &sdkmcp.Tool{
-		Name:        "list_folders",
-		Description: "List all folders (notebooks). Use folder IDs as parent_id when creating notes or subfolders.",
-	}, listFoldersHandler(d))
-	sdkmcp.AddTool(server, &sdkmcp.Tool{
-		Name:        "get_folder",
-		Description: "Get folder (notebook) by ID",
-	}, getFolderHandler(d))
-	sdkmcp.AddTool(server, &sdkmcp.Tool{
-		Name:        "create_folder",
-		Description: "Create a folder (notebook). Pass title (required) and optional parent_id to create a subfolder.",
-	}, createFolderHandler(d))
-	sdkmcp.AddTool(server, &sdkmcp.Tool{
-		Name:        "list_tags",
-		Description: "List tags",
-	}, listTagsHandler(d))
-	sdkmcp.AddTool(server, &sdkmcp.Tool{
-		Name:        "get_note_tags",
-		Description: "Get tags for a note",
-	}, getNoteTagsHandler(d))
-	sdkmcp.AddTool(server, &sdkmcp.Tool{
-		Name:        "list_resources",
-		Description: "List resources, optionally filtered by note ID",
-	}, listResourcesHandler(d))
-	sdkmcp.AddTool(server, &sdkmcp.Tool{
-		Name:        "trigger_sync",
-		Description: "Trigger a sync run (no wait)",
-	}, triggerSyncHandler(d))
-	sdkmcp.AddTool(server, &sdkmcp.Tool{
-		Name:        "get_capabilities",
-		Description: "Get mutation capabilities (folders/tags read-write vs read-only, tag/folder creation allowed). Use this to know which folders you can create notes in and which tags you can use.",
-	}, getCapabilitiesHandler(d))
+	enabled := d.EnabledTools
+
+	if isToolEnabled("list_notes", enabled) {
+		sdkmcp.AddTool(server, &sdkmcp.Tool{
+			Name:        "list_notes",
+			Description: "List notes with optional folder and limit",
+		}, listNotesHandler(d))
+	}
+	if isToolEnabled("get_note", enabled) {
+		sdkmcp.AddTool(server, &sdkmcp.Tool{
+			Name:        "get_note",
+			Description: "Get a note by ID",
+		}, getNoteHandler(d))
+	}
+	if isToolEnabled("create_note", enabled) {
+		sdkmcp.AddTool(server, &sdkmcp.Tool{
+			Name:        "create_note",
+			Description: "Create a note. Pass title (required), optional body, optional folder placement via parent_id (folder ID) or folder_name (case-insensitive name), and optional tags via tags (list of tag IDs) or tag_names (list of tag names, auto-created if missing). Use folder_name and tag_names when you have names instead of IDs.",
+		}, createNoteHandler(d))
+	}
+	if isToolEnabled("update_note", enabled) {
+		sdkmcp.AddTool(server, &sdkmcp.Tool{
+			Name:        "update_note",
+			Description: "Update note title or body",
+		}, updateNoteHandler(d))
+	}
+	if isToolEnabled("search_notes", enabled) {
+		sdkmcp.AddTool(server, &sdkmcp.Tool{
+			Name:        "search_notes",
+			Description: "Full-text search in notes",
+		}, searchNotesHandler(d))
+	}
+	if isToolEnabled("list_folders", enabled) {
+		sdkmcp.AddTool(server, &sdkmcp.Tool{
+			Name:        "list_folders",
+			Description: "List all folders (notebooks). Use folder IDs as parent_id when creating notes or subfolders.",
+		}, listFoldersHandler(d))
+	}
+	if isToolEnabled("get_folder", enabled) {
+		sdkmcp.AddTool(server, &sdkmcp.Tool{
+			Name:        "get_folder",
+			Description: "Get folder (notebook) by ID",
+		}, getFolderHandler(d))
+	}
+	if isToolEnabled("create_folder", enabled) {
+		sdkmcp.AddTool(server, &sdkmcp.Tool{
+			Name:        "create_folder",
+			Description: "Create a folder (notebook). Pass title (required) and optional parent_id to create a subfolder.",
+		}, createFolderHandler(d))
+	}
+	if isToolEnabled("list_tags", enabled) {
+		sdkmcp.AddTool(server, &sdkmcp.Tool{
+			Name:        "list_tags",
+			Description: "List tags",
+		}, listTagsHandler(d))
+	}
+	if isToolEnabled("get_note_tags", enabled) {
+		sdkmcp.AddTool(server, &sdkmcp.Tool{
+			Name:        "get_note_tags",
+			Description: "Get tags for a note",
+		}, getNoteTagsHandler(d))
+	}
+	if isToolEnabled("list_resources", enabled) {
+		sdkmcp.AddTool(server, &sdkmcp.Tool{
+			Name:        "list_resources",
+			Description: "List resources, optionally filtered by note ID",
+		}, listResourcesHandler(d))
+	}
+	if isToolEnabled("trigger_sync", enabled) {
+		sdkmcp.AddTool(server, &sdkmcp.Tool{
+			Name:        "trigger_sync",
+			Description: "Trigger a sync run (no wait)",
+		}, triggerSyncHandler(d))
+	}
+	if isToolEnabled("get_capabilities", enabled) {
+		sdkmcp.AddTool(server, &sdkmcp.Tool{
+			Name:        "get_capabilities",
+			Description: "Get mutation capabilities (folders/tags read-write vs read-only, tag/folder creation allowed). Use this to know which folders you can create notes in and which tags you can use.",
+		}, getCapabilitiesHandler(d))
+	}
 }
 
 // --- Input/Output structs (easy to modify per tool) ---
@@ -141,8 +185,14 @@ func listNotesHandler(d *Deps) func(context.Context, *sdkmcp.CallToolRequest, Li
 			}
 			notes = filtered
 		}
-		out := map[string]any{"notes": notes, "count": len(notes)}
-		return nil, out, nil
+		slim := make([]map[string]any, 0, len(notes))
+		for _, n := range notes {
+			slim = append(slim, map[string]any{
+				"id": n.ID, "title": n.Title, "parent_id": n.ParentID,
+				"is_todo": n.IsTodo, "updated_time": n.UpdatedTime,
+			})
+		}
+		return nil, map[string]any{"notes": slim, "count": len(slim)}, nil
 	}
 }
 
@@ -334,7 +384,14 @@ func searchNotesHandler(d *Deps) func(context.Context, *sdkmcp.CallToolRequest, 
 		if err != nil {
 			return nil, nil, err
 		}
-		return nil, map[string]any{"notes": notes, "count": len(notes)}, nil
+		slim := make([]map[string]any, 0, len(notes))
+		for _, n := range notes {
+			slim = append(slim, map[string]any{
+				"id": n.ID, "title": n.Title, "parent_id": n.ParentID,
+				"updated_time": n.UpdatedTime,
+			})
+		}
+		return nil, map[string]any{"notes": slim, "count": len(slim)}, nil
 	}
 }
 
@@ -344,7 +401,13 @@ func listFoldersHandler(d *Deps) func(context.Context, *sdkmcp.CallToolRequest, 
 		if err != nil {
 			return nil, nil, err
 		}
-		return nil, map[string]any{"folders": folders, "count": len(folders)}, nil
+		slim := make([]map[string]any, 0, len(folders))
+		for _, f := range folders {
+			slim = append(slim, map[string]any{
+				"id": f.ID, "title": f.Title, "parent_id": f.ParentID,
+			})
+		}
+		return nil, map[string]any{"count": len(slim), "folders": slim}, nil
 	}
 }
 
@@ -389,7 +452,13 @@ func listTagsHandler(d *Deps) func(context.Context, *sdkmcp.CallToolRequest, Lis
 		if err != nil {
 			return nil, nil, err
 		}
-		return nil, map[string]any{"tags": tags, "count": len(tags)}, nil
+		slim := make([]map[string]any, 0, len(tags))
+		for _, tg := range tags {
+			slim = append(slim, map[string]any{
+				"id": tg.ID, "title": tg.Title,
+			})
+		}
+		return nil, map[string]any{"tags": slim, "count": len(slim)}, nil
 	}
 }
 
@@ -402,7 +471,13 @@ func getNoteTagsHandler(d *Deps) func(context.Context, *sdkmcp.CallToolRequest, 
 		if err != nil {
 			return nil, nil, err
 		}
-		return nil, map[string]any{"tags": tags, "count": len(tags)}, nil
+		slim := make([]map[string]any, 0, len(tags))
+		for _, tg := range tags {
+			slim = append(slim, map[string]any{
+				"id": tg.ID, "title": tg.Title,
+			})
+		}
+		return nil, map[string]any{"tags": slim, "count": len(slim)}, nil
 	}
 }
 
@@ -427,7 +502,14 @@ func listResourcesHandler(d *Deps) func(context.Context, *sdkmcp.CallToolRequest
 		if err != nil {
 			return nil, nil, err
 		}
-		return nil, map[string]any{"resources": resources, "count": len(resources)}, nil
+		slim := make([]map[string]any, 0, len(resources))
+		for _, r := range resources {
+			slim = append(slim, map[string]any{
+				"id": r.ID, "title": r.Title, "mime": r.Mime,
+				"filename": r.Filename, "size": r.Size,
+			})
+		}
+		return nil, map[string]any{"resources": slim, "count": len(slim)}, nil
 	}
 }
 
