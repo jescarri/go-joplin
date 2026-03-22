@@ -110,7 +110,7 @@ var serveCmd = &cobra.Command{
 		policy := mcp.NewPolicy(cfg)
 		var mcpHandler http.Handler
 		{
-			mcpDeps := &mcp.Deps{DB: db, Syncer: engine, Policy: policy}
+			mcpDeps := &mcp.Deps{DB: db, Syncer: engine, Policy: policy, EnabledTools: cfg.MCPEnabledTools}
 			mcpServer := mcp.NewServer(mcpDeps)
 			mcpHandler = mcp.NewSSEHandler(func(r *http.Request) *mcp.Server { return mcpServer })
 		}

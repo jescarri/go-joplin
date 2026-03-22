@@ -72,6 +72,7 @@ type yamlMCP struct {
 	AllowTags         string `yaml:"allow_tags"`
 	AllowCreateTag    bool   `yaml:"allow_create_tag"`
 	AllowCreateFolder bool   `yaml:"allow_create_folder"`
+	EnabledTools      string `yaml:"enabled_tools"`
 }
 
 // loadFromYAML parses data as the native YAML config and returns a Config.
@@ -163,6 +164,7 @@ func loadFromYAML(data []byte) (*Config, error) {
 	cfg.MCPAllowTags = strings.TrimSpace(y.MCP.AllowTags)
 	cfg.MCPAllowCreateTag = y.MCP.AllowCreateTag
 	cfg.MCPAllowCreateFolder = y.MCP.AllowCreateFolder
+	cfg.MCPEnabledTools = strings.TrimSpace(y.MCP.EnabledTools)
 
 	return cfg, nil
 }
@@ -284,5 +286,8 @@ func applyRuntimeDefaults(cfg *Config) {
 	}
 	if v := os.Getenv("GOJOPLIN_MCP_ALLOW_CREATE_FOLDER"); v != "" {
 		cfg.MCPAllowCreateFolder = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := os.Getenv("GOJOPLIN_MCP_ENABLED_TOOLS"); v != "" {
+		cfg.MCPEnabledTools = strings.TrimSpace(v)
 	}
 }

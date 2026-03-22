@@ -85,6 +85,7 @@ type Config struct {
 	MCPAllowTags         string `json:"-"` // comma-separated tag IDs or titles; "*" = all
 	MCPAllowCreateTag    bool   `json:"-"` // allow creating new tags
 	MCPAllowCreateFolder bool   `json:"-"` // allow creating new folders
+	MCPEnabledTools      string `json:"-"` // comma-separated tool names or "*" for all (default "*")
 }
 
 // ListenAddr returns the address the clipper server should listen on.

@@ -11,7 +11,8 @@ type SyncTrigger interface {
 
 // Deps holds dependencies for MCP tool handlers. Easy to extend for new tools.
 type Deps struct {
-	DB     *store.DB
-	Syncer SyncTrigger
-	Policy *Policy // nil = all mutations denied (read-only)
+	DB           *store.DB
+	Syncer       SyncTrigger
+	Policy       *Policy // nil = all mutations denied (read-only)
+	EnabledTools string  // comma-separated tool names or "*" for all (default "*")
 }

@@ -11,7 +11,7 @@ type Server = sdkmcp.Server
 
 const (
 	implementationName    = "gojoplin"
-	implementationVersion = "v1.0.0"
+	implementationVersion = "v1.1.0"
 )
 
 // NewServer creates an MCP server with all tools and resources registered.

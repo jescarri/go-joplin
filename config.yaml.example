@@ -65,3 +65,7 @@ mcp:
   allow_tags: ""           # Comma-separated tag IDs or titles; "*" = all
   allow_create_tag: false
   allow_create_folder: false
+  # Tool filtering: only register these tools with the MCP server.
+  # Default "*" = all 13 tools. Set to a comma-separated list to reduce context tokens.
+  # Example: "create_note,list_folders,list_tags,create_folder,search_notes"
+  enabled_tools: "*"
