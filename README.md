@@ -16,30 +16,32 @@ This project is not affiliated with Joplin. **Joplin** is the open-source note-t
 
 - **Web Clipper API**: Notes, folders, tags, resources, search, and events endpoints compatible with the Joplin clipper.
 - **MCP (Model Context Protocol)**: SSE endpoint at `/mcp` with Bearer token auth; tools for notes, folders, tags, resources, search, and sync. Tool registration and prompts are easy to modify in `internal/mcp`.
-- **Observability**: OpenTelemetry tracing (OTLP HTTP), Prometheus metrics on a separate port; `/health` returns 200 (no trace/log). p99 and other quantiles via Prometheus recording rules (see `docs/prometheus-recording-rules.yaml`).
+- **RAG Semantic Search**: Optional vector-based search using [sqlite-vec](https://github.com/asg017/sqlite-vec) and any OpenAI-compatible embedding API (OpenAI, ollama, local-ai, vLLM). Falls back to FTS4 keyword search when disabled or unavailable. See [RAG Semantic Search](#rag-semantic-search) below.
+- **Observability**: OpenTelemetry tracing (OTLP HTTP/gRPC), Prometheus metrics on a separate port; `/health` returns 200 (no trace/log). p99 and other quantiles via Prometheus recording rules (see `docs/prometheus-recording-rules.yaml`).
 - **Sync targets**:
   - **Joplin Server** (sync target 9): Sync over HTTP with a Joplin Server instance.
-  - **S3** (sync target 8): Sync with any S3-compatible storage (AWS S3, MinIO, Backblaze B2, etc.). Uses the same object layout as Joplin’s built-in S3 sync.
+  - **S3** (sync target 8): Sync with any S3-compatible storage (AWS S3, MinIO, Backblaze B2, etc.). Uses the same object layout as Joplin's built-in S3 sync.
 - **End-to-end encryption**: Uses existing Joplin E2EE; no changes to crypto.
 
 ## Requirements
 
-- Go 1.24 or later
+- Go 1.24 or later (CGO required for SQLite and sqlite-vec)
 - For **Joplin Server** sync: Joplin Server URL, username, password, and API token from your Joplin config.
 - For **S3** sync: Bucket name, region, endpoint URL (and optional force path style for MinIO). **Credentials must be provided via environment variables** (see below).
+- For **RAG search** (optional): An OpenAI-compatible embedding API endpoint (OpenAI, ollama, local-ai, vLLM, etc.).
 
 ## Build
 
 From the project root:
 
 ```bash
-go build -o go-joplin .
+CGO_ENABLED=1 go build -ldflags="-s -w" -o go-joplin .
 ```
 
 To install into `$GOPATH/bin` (or `$HOME/go/bin`):
 
 ```bash
-go install .
+CGO_ENABLED=1 go install .
 ```
 
 ## Configuration
@@ -86,7 +88,7 @@ Joplin stores its configuration in **`settings.json`** (not `config.json`). Use 
 | `sync.9.username` | Joplin Server username. | `GOJOPLIN_USERNAME`. |
 | `sync.9.password` | Joplin Server password. | `GOJOPLIN_PASSWORD`. |
 
-For **Bearer auth** (clipper/MCP), use the same token as `api.token` or set a dedicated key via `GOJOPLIN_API_KEY` or `--api-key`. The `api.token` value is the one Joplin shows in **Tools → Web Clipper** after authorizing the clipper.
+For **Bearer auth** (clipper/MCP), use the same token as `api.token` or set a dedicated key via `GOJOPLIN_API_KEY` or `--api-key`. The `api.token` value is the one Joplin shows in **Tools > Web Clipper** after authorizing the clipper.
 
 ### Environment variables
 
@@ -96,7 +98,7 @@ Precedence: **env vars > CLI flags > config file**. All secrets should be provid
 
 | Variable | Description | When |
 |----------|-------------|------|
-| `GOJOPLIN_API_TOKEN` | Joplin Web Clipper token (same as Joplin’s `api.token`). Used by `/auth` and `/auth/check`. | Always when using YAML config; otherwise from Joplin `api.token`. |
+| `GOJOPLIN_API_TOKEN` | Joplin Web Clipper token (same as Joplin's `api.token`). Used by `/auth` and `/auth/check`. | Always when using YAML config; otherwise from Joplin `api.token`. |
 | `GOJOPLIN_API_KEY` | Bearer token for clipper and MCP requests. Can be the same as `GOJOPLIN_API_TOKEN`. | Required for non-`/health` requests; if unset, server returns 401. |
 | `AWS_ACCESS_KEY_ID` | S3 access key. | When sync target is S3 (target 8). |
 | `AWS_SECRET_ACCESS_KEY` | S3 secret key. | When sync target is S3 (target 8). |
@@ -117,7 +119,7 @@ S3 credentials can also be provided as `ACCESS_KEY_ID` and `SECRET_ACCESS_KEY`. 
 | `GOJOPLIN_TRACING_ENABLED` | Enable OpenTelemetry tracing (default: true). |
 | `GOJOPLIN_TRACING_PROTOCOL` | OTLP protocol: `http` or `grpc` (default: http). |
 | `GOJOPLIN_TRACING_SERVICE_NAME` | Service name for traces (default: go-joplin). |
-| `GOJOPLIN_TRACING_SAMPLE_RATE` | Trace sample rate 0–1 (default: 1.0). |
+| `GOJOPLIN_TRACING_SAMPLE_RATE` | Trace sample rate 0-1 (default: 1.0). |
 | `GOJOPLIN_METRICS_ENABLED` | Enable Prometheus metrics (default: true). |
 | `GOJOPLIN_METRICS_PROMETHEUS_PORT` | Port for /metrics (default: 9091). |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP endpoint for traces (e.g. http://localhost:4318). |
@@ -126,6 +128,20 @@ S3 credentials can also be provided as `ACCESS_KEY_ID` and `SECRET_ACCESS_KEY`. 
 | `GOJOPLIN_MCP_ALLOW_CREATE_TAG` | Allow creating new tags (default: false). |
 | `GOJOPLIN_MCP_ALLOW_CREATE_FOLDER` | Allow creating new folders (default: false). |
 | `GOJOPLIN_MCP_ENABLED_TOOLS` | Comma-separated tool names to register (default: `*` = all). Use to reduce token consumption for LLM agents. Example: `create_note,list_folders,list_tags,create_folder,search_notes`. |
+
+#### RAG (semantic search)
+
+| Variable | Description |
+|----------|-------------|
+| `GOJOPLIN_RAG_ENABLED` | Enable RAG semantic search (default: false). |
+| `GOJOPLIN_RAG_ENDPOINT` | OpenAI-compatible embedding API base URL (e.g. `https://api.openai.com/v1` or `http://localhost:11434/v1`). |
+| `GOJOPLIN_RAG_API_KEY` | Embedding API key. |
+| `GOJOPLIN_RAG_MODEL` | Embedding model name (default: `text-embedding-3-small`). |
+| `GOJOPLIN_RAG_DIMENSIONS` | Vector dimensions (default: 1536). Must match the model's output dimensions. |
+| `GOJOPLIN_RAG_CHUNK_SIZE` | Max tokens per chunk (default: 512). |
+| `GOJOPLIN_RAG_CHUNK_OVERLAP` | Overlap tokens between chunks (default: 50). |
+| `GOJOPLIN_RAG_WORKERS` | Number of indexer worker goroutines (default: 2). |
+| `GOJOPLIN_RAG_QUEUE_SIZE` | Indexer queue size (default: 1000). |
 
 ### Native YAML config
 
@@ -145,17 +161,17 @@ export AWS_SECRET_ACCESS_KEY="your-s3-secret-key"
 
 In the YAML file you can use `${VAR}` for values that come from the environment (e.g. `api.token: "${GOJOPLIN_API_TOKEN}"`). See `config.yaml.example` for the full structure.
 
-- **Sync target 9 (Joplin Server)**  
-  Set `sync.target` to 9 and configure server URL. With Joplin settings.json: `sync.9.path` (server URL), `sync.9.username`, `sync.9.password`. With YAML: `sync.joplin_server.url`; set `GOJOPLIN_USERNAME` and `GOJOPLIN_PASSWORD`. The clipper also needs the API token (Joplin’s Web Clipper `api.token` or `GOJOPLIN_API_TOKEN`).
+- **Sync target 9 (Joplin Server)**
+  Set `sync.target` to 9 and configure server URL. With Joplin settings.json: `sync.9.path` (server URL), `sync.9.username`, `sync.9.password`. With YAML: `sync.joplin_server.url`; set `GOJOPLIN_USERNAME` and `GOJOPLIN_PASSWORD`. The clipper also needs the API token (Joplin's Web Clipper `api.token` or `GOJOPLIN_API_TOKEN`).
 
-- **Sync target 8 (S3)**  
+- **Sync target 8 (S3)**
   Set `sync.target` to 8. With Joplin settings.json: `sync.8.path` (bucket), `sync.8.url`, `sync.8.region`, `sync.8.forcePathStyle`; credentials can be in the file (`sync.8.username`, `sync.8.password`) or in env. With YAML: set `sync.s3.bucket`, `sync.s3.url`, `sync.s3.region`, `sync.s3.force_path_style`; credentials must be in env: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (or `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`).
 
   The S3 client works with both official AWS S3 and S3-compatible storage (e.g. MinIO).
 
-  **S3 503 / “XML syntax error … element &lt;hr&gt;”:** That usually means the endpoint URL is returning an **HTML error page** (e.g. from a proxy or load balancer) instead of the S3 API. Check that `sync.s3.url` (or `sync.8.url`) points at the real S3-compatible API root (e.g. `https://s3.example.com` with no extra path), that the service is up, and that it speaks S3 XML (not an HTML 503 page). You can probe the endpoint with `curl -I "https://your-endpoint/bucket"` (with auth if required).
+  **S3 503 / "XML syntax error ... element &lt;hr&gt;":** That usually means the endpoint URL is returning an **HTML error page** (e.g. from a proxy or load balancer) instead of the S3 API. Check that `sync.s3.url` (or `sync.8.url`) points at the real S3-compatible API root (e.g. `https://s3.example.com` with no extra path), that the service is up, and that it speaks S3 XML (not an HTML 503 page). You can probe the endpoint with `curl -I "https://your-endpoint/bucket"` (with auth if required).
 
-- **Mutation allow-list (MCP and Clipper API)**  
+- **Mutation allow-list (MCP and Clipper API)**
   By default all mutations (create/update notes, folders, tags) are **read-only**. To allow writes:
 
   - `GOJOPLIN_MCP_ALLOW_FOLDERS`: Comma-separated folder names or IDs where notes can be created/updated. Use `*` to allow all folders.
@@ -179,6 +195,65 @@ In the YAML file you can use `${VAR}` for values that come from the environment 
   ```
 
   LLMs can discover allowed operations via the MCP resource `joplingo://capabilities` or the `get_capabilities` tool.
+
+## RAG Semantic Search
+
+When enabled, note search uses vector embeddings for semantic similarity instead of FTS4 keyword matching. This means searching "container orchestration" can find a note titled "Kubernetes deployment guide" even if those exact words don't appear.
+
+RAG is **opt-in** (`rag.enabled: false` by default). When disabled, all search paths use FTS4 exactly as before. When enabled but the embedding API is unreachable, search falls back to FTS4 gracefully.
+
+### How it works
+
+1. Notes are split into fixed-size overlapping text chunks (configurable, default 512 tokens / 50 token overlap)
+2. Each chunk is embedded via an OpenAI-compatible `/v1/embeddings` endpoint
+3. Embeddings are stored in [sqlite-vec](https://github.com/asg017/sqlite-vec) (`vec0` virtual table) in the same SQLite database — never synced to S3/Joplin Server
+4. Search embeds the query, runs KNN against the vector table, deduplicates by note, and returns full note objects
+5. A SHA-256 content hash per note avoids re-chunking and re-embedding unchanged notes
+
+### Enabling RAG
+
+```bash
+export GOJOPLIN_RAG_ENABLED=true
+export GOJOPLIN_RAG_ENDPOINT="http://localhost:11434/v1"  # ollama
+export GOJOPLIN_RAG_MODEL="nomic-embed-text"
+export GOJOPLIN_RAG_DIMENSIONS=768
+./go-joplin serve --config config.yaml
+```
+
+Or in `config.yaml`:
+
+```yaml
+rag:
+  enabled: true
+  endpoint: "${GOJOPLIN_RAG_ENDPOINT}"
+  api_key: "${GOJOPLIN_RAG_API_KEY}"
+  model: "text-embedding-3-small"
+  dimensions: 1536
+```
+
+### Indexing
+
+Indexing runs asynchronously in background worker goroutines and never blocks MCP or Clipper API operations:
+
+- **On startup**: All existing notes are indexed (unchanged notes are skipped via hash check)
+- **After each sync**: Newly synced or decrypted notes are indexed
+- **On API create/update**: The note is enqueued for immediate indexing
+- **On delete**: RAG data (chunks, vectors, hash) is cleaned up
+
+Encrypted notes (`encryption_applied=1`) are skipped until they are decrypted by the sync engine.
+
+### Model or dimension changes
+
+Changing the embedding model or dimensions in config triggers a full re-index on next startup. The old vector table is dropped, all chunks and hashes are cleared, and all notes are re-processed. This is detected automatically via stored metadata in the database.
+
+### Observability
+
+RAG operations emit OpenTelemetry traces (`rag.embed`, `rag.chunk`, `rag.index_note`, `rag.search`, etc.) and Prometheus metrics:
+
+- `rag_embedding_requests_total` / `rag_embedding_duration_seconds` — embedding API calls and latency
+- `rag_index_notes_total` / `rag_index_duration_seconds` — indexing throughput
+- `rag_search_requests_total` / `rag_search_duration_seconds` — search performance
+- `rag_index_queue_depth` — current indexer queue depth
 
 ## Usage
 
@@ -218,15 +293,32 @@ docker run -d \
   -v gojoplin-data:/data \
   -e GOJOPLIN_CONFIG_PATH=/config/settings.json \
   -e GOJOPLIN_DATA_DIR=/data \
-  ghcr.io/jescarri/gojoplin:latest serve --api-key YOUR_JOPLIN_API_KEY
+  -e GOJOPLIN_API_KEY=YOUR_BEARER_KEY \
+  ghcr.io/jescarri/gojoplin:latest serve
 ```
 
 - `/config:ro` — Joplin settings (sync targets, API token, etc.) mounted **read-only**
 - `/data` — Writable volume for the local SQLite DB and resources
 
+With RAG enabled (using ollama on the host):
+
+```bash
+docker run -d \
+  -p 41184:41184 \
+  -v gojoplin-data:/data \
+  -e GOJOPLIN_CONFIG_PATH=/config/config.yaml \
+  -e GOJOPLIN_DATA_DIR=/data \
+  -e GOJOPLIN_API_KEY=YOUR_BEARER_KEY \
+  -e GOJOPLIN_RAG_ENABLED=true \
+  -e GOJOPLIN_RAG_ENDPOINT=http://host.docker.internal:11434/v1 \
+  -e GOJOPLIN_RAG_MODEL=nomic-embed-text \
+  -e GOJOPLIN_RAG_DIMENSIONS=768 \
+  ghcr.io/jescarri/gojoplin:latest serve
+```
+
 ## Releases and CI
 
-- **Branches and PRs**: CI runs tests and build (and validates the Dockerfile); no image is pushed.
+- **Branches and PRs**: CI runs tests, build, and pushes container images tagged with branch name (`ghcr.io/.../gojoplin:<branch>`), PR number, and commit SHA.
 - **Main branch**: On every push to `main`, the workflow runs tests, [semantic-release](https://github.com/semantic-release/semantic-release) (which may create a new version and GitHub Release from [Conventional Commits](https://www.conventionalcommits.org/)), and pushes the container image to GitHub Container Registry as `latest` and `sha-<short-sha>`. If semantic-release publishes a new version (e.g. `v1.2.3`), that tag is also pushed to GHCR.
 - **Tag push (`v*`)**: Pushing a tag (e.g. `v1.0.0`) runs tests and pushes the image with that tag to GHCR.
 
@@ -236,16 +328,18 @@ Configuration for semantic-release is in [.releaserc.json](.releaserc.json).
 
 - `cmd/`: CLI commands (`serve`, `sync`, `config`, etc.)
 - `internal/config`: Load and validate config from Joplin settings.json (JSON) or native YAML (see `config.yaml.example`); observability and overrides from env.
-- `internal/store`: SQLite store (notes, folders, tags, resources, sync state).
+- `internal/store`: SQLite store (notes, folders, tags, resources, sync state, RAG chunks/vectors/hashes).
 - `internal/sync`: Sync engine; HTTP client for Joplin Server and S3 backend for S3/MinIO; traced backend wrapper.
 - `internal/s3`: S3 client (AWS SDK v2) for official S3 and S3-compatible endpoints.
 - `internal/clipper`: Web Clipper HTTP API and handlers; `/health`, metrics middleware.
 - `internal/mcp`: MCP server over SSE; tool registry and handlers (easy to modify).
+- `internal/rag`: RAG pipeline — text chunker, OpenAI-compatible embedder, async indexer with worker pool, vector similarity search with FTS4 fallback, Prometheus metrics.
 - `internal/telemetry`: OpenTelemetry tracer provider, Prometheus registry and request-duration histogram.
 - `internal/e2ee`, `internal/models`: E2EE and shared models (E2EE calls traced).
+- `docs/adr/`: Architecture Decision Records documenting design choices.
 - `docs/prometheus-recording-rules.yaml`: Example recording rules for p99/p95/p50 of API latency.
-
+- `implementation_plans/`: Step-by-step implementation plans matching ADRs.
 
 ## License
 
-This project is licensed under the same terms as Joplin: **AGPL-3.0-or-later**. See the [LICENSE](LICENSE) file in this repository. The [Joplin project](https://github.com/laurent22/joplin) is © 2016–2025 [Laurent Cozic](https://github.com/laurent22); Joplin® is a trademark of JOPLIN SAS.
+This project is licensed under the same terms as Joplin: **AGPL-3.0-or-later**. See the [LICENSE](LICENSE) file in this repository. The [Joplin project](https://github.com/laurent22/joplin) is (c) 2016-2025 [Laurent Cozic](https://github.com/laurent22); Joplin is a trademark of JOPLIN SAS.
