@@ -141,8 +141,9 @@ func (idx *Indexer) IndexAll(ctx context.Context) error {
 		return err
 	}
 
+	total := len(allIDs)
 	var indexedCount, skippedCount, errorCount int
-	for _, noteID := range allIDs {
+	for i, noteID := range allIDs {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -159,6 +160,17 @@ func (idx *Indexer) IndexAll(ctx context.Context) error {
 			indexedCount++
 		case indexResultSkipped:
 			skippedCount++
+		}
+		// Log progress every 50 notes or on the last note
+		processed := i + 1
+		if processed%50 == 0 || processed == total {
+			slog.Info("RAG IndexAll progress",
+				"processed", processed,
+				"total", total,
+				"indexed", indexedCount,
+				"skipped", skippedCount,
+				"errors", errorCount,
+			)
 		}
 	}
 
