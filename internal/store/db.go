@@ -7,8 +7,13 @@ import (
 	"os"
 	"path/filepath"
 
+	sqlite_vec "github.com/asg017/sqlite-vec-go-bindings/cgo"
 	_ "github.com/mattn/go-sqlite3"
 )
+
+func init() {
+	sqlite_vec.Auto()
+}
 
 // DB wraps a sql.DB for Joplin data storage.
 type DB struct {
@@ -283,4 +288,80 @@ var schemaStatements = []string{
 	`CREATE INDEX IF NOT EXISTS idx_deleted_items_sync_target ON deleted_items(sync_target)`,
 	`CREATE INDEX IF NOT EXISTS idx_item_changes_item_id ON item_changes(item_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_item_changes_created_time ON item_changes(created_time)`,
+
+	// RAG tables (never synced; rag_ prefix)
+	`CREATE TABLE IF NOT EXISTS rag_note_hashes (
+		note_id    TEXT PRIMARY KEY,
+		body_hash  TEXT NOT NULL,
+		updated_at INTEGER NOT NULL DEFAULT 0
+	)`,
+
+	`CREATE TABLE IF NOT EXISTS rag_chunks (
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		note_id     TEXT NOT NULL,
+		chunk_index INTEGER NOT NULL,
+		content     TEXT NOT NULL,
+		token_count INTEGER NOT NULL DEFAULT 0,
+		UNIQUE(note_id, chunk_index)
+	)`,
+
+	`CREATE INDEX IF NOT EXISTS idx_rag_chunks_note_id ON rag_chunks(note_id)`,
+}
+
+// InitRAG creates or rebuilds the rag_vec virtual table. If the model or dimensions
+// changed since the last run, all RAG data is wiped to force a full re-index.
+func (db *DB) InitRAG(model string, dimensions int) error {
+	storedModel := db.getKV("rag_model")
+	storedDims := db.getKV("rag_dimensions")
+
+	needsRebuild := false
+	if storedModel == "" && storedDims == "" {
+		// First run
+		slog.Info("initializing RAG tables", "model", model, "dimensions", dimensions)
+	} else if storedModel != model || storedDims != fmt.Sprintf("%d", dimensions) {
+		// Model or dimensions changed
+		slog.Warn("RAG model/dimensions changed, full re-index required",
+			"old_model", storedModel, "new_model", model,
+			"old_dimensions", storedDims, "new_dimensions", dimensions)
+		needsRebuild = true
+	} else {
+		// Normal restart, nothing to do
+		return nil
+	}
+
+	if needsRebuild {
+		if _, err := db.Exec("DROP TABLE IF EXISTS rag_vec"); err != nil {
+			return fmt.Errorf("drop rag_vec: %w", err)
+		}
+		if _, err := db.Exec("DELETE FROM rag_chunks"); err != nil {
+			return fmt.Errorf("clear rag_chunks: %w", err)
+		}
+		if _, err := db.Exec("DELETE FROM rag_note_hashes"); err != nil {
+			return fmt.Errorf("clear rag_note_hashes: %w", err)
+		}
+	}
+
+	ddl := fmt.Sprintf(`CREATE VIRTUAL TABLE IF NOT EXISTS rag_vec USING vec0(chunk_id INTEGER PRIMARY KEY, embedding float[%d])`, dimensions)
+	if _, err := db.Exec(ddl); err != nil {
+		return fmt.Errorf("create rag_vec: %w", err)
+	}
+
+	if err := db.setKV("rag_model", model); err != nil {
+		return err
+	}
+	return db.setKV("rag_dimensions", fmt.Sprintf("%d", dimensions))
+}
+
+func (db *DB) getKV(key string) string {
+	var val string
+	err := db.QueryRow("SELECT value FROM key_values WHERE key = ?", key).Scan(&val)
+	if err != nil {
+		return ""
+	}
+	return val
+}
+
+func (db *DB) setKV(key, value string) error {
+	_, err := db.Exec(`INSERT OR REPLACE INTO key_values (key, value, type, updated_time) VALUES (?, ?, 1, strftime('%s','now') * 1000)`, key, value)
+	return err
 }

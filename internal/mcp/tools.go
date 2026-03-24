@@ -241,6 +241,9 @@ func createNoteHandler(d *Deps) func(context.Context, *sdkmcp.CallToolRequest, C
 				return nil, nil, fmt.Errorf("add tag %q: %w", tagID, err)
 			}
 		}
+		if d.RAGIndexer != nil {
+			d.RAGIndexer.Enqueue(note.ID)
+		}
 		if d.Syncer != nil {
 			d.Syncer.TriggerSync()
 		}
@@ -364,6 +367,9 @@ func updateNoteHandler(d *Deps) func(context.Context, *sdkmcp.CallToolRequest, U
 		if err := d.DB.UpdateNote(note); err != nil {
 			return nil, nil, err
 		}
+		if d.RAGIndexer != nil {
+			d.RAGIndexer.Enqueue(note.ID)
+		}
 		if d.Syncer != nil {
 			d.Syncer.TriggerSync()
 		}
@@ -380,10 +386,24 @@ func searchNotesHandler(d *Deps) func(context.Context, *sdkmcp.CallToolRequest, 
 		if limit <= 0 {
 			limit = 20
 		}
-		notes, _, err := d.DB.SearchNotes(in.Query, limit, 0)
+
+		var notes []*models.Note
+		var err error
+
+		// Try RAG search first, fall back to FTS4
+		if d.RAGSearcher != nil {
+			notes, _, err = d.RAGSearcher.Search(ctx, in.Query, limit)
+			if err != nil {
+				// Fall back to FTS4
+				notes, _, err = d.DB.SearchNotes(in.Query, limit, 0)
+			}
+		} else {
+			notes, _, err = d.DB.SearchNotes(in.Query, limit, 0)
+		}
 		if err != nil {
 			return nil, nil, err
 		}
+
 		slim := make([]map[string]any, 0, len(notes))
 		for _, n := range notes {
 			slim = append(slim, map[string]any{

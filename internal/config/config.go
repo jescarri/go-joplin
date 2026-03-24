@@ -86,6 +86,22 @@ type Config struct {
 	MCPAllowCreateTag    bool   `json:"-"` // allow creating new tags
 	MCPAllowCreateFolder bool   `json:"-"` // allow creating new folders
 	MCPEnabledTools      string `json:"-"` // comma-separated tool names or "*" for all (default "*")
+
+	// RAG (Retrieval Augmented Generation) semantic search.
+	RAG RAGConfig `json:"-"`
+}
+
+// RAGConfig holds RAG/embedding configuration.
+type RAGConfig struct {
+	Enabled      bool   // GOJOPLIN_RAG_ENABLED
+	Endpoint     string // GOJOPLIN_RAG_ENDPOINT — OpenAI-compatible base URL
+	APIKey       string // GOJOPLIN_RAG_API_KEY
+	Model        string // GOJOPLIN_RAG_MODEL (e.g. "text-embedding-3-small")
+	Dimensions   int    // GOJOPLIN_RAG_DIMENSIONS (default: 1536)
+	ChunkSize    int    // GOJOPLIN_RAG_CHUNK_SIZE (default: 512)
+	ChunkOverlap int    // GOJOPLIN_RAG_CHUNK_OVERLAP (default: 50)
+	Workers      int    // GOJOPLIN_RAG_WORKERS (default: 2)
+	QueueSize    int    // GOJOPLIN_RAG_QUEUE_SIZE (default: 1000)
 }
 
 // ListenAddr returns the address the clipper server should listen on.

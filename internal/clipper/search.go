@@ -40,7 +40,19 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		writePaginated(w, tags, hasMore, p.Fields)
 
 	default: // "note" or empty defaults to note search
-		notes, hasMore, err := s.db.SearchNotes(query, p.Limit, p.offset())
+		var notes []*models.Note
+		var hasMore bool
+		var err error
+
+		if s.ragSearcher != nil {
+			notes, hasMore, err = s.ragSearcher.Search(r.Context(), query, p.Limit)
+			if err != nil {
+				// Fall back to FTS4
+				notes, hasMore, err = s.db.SearchNotes(query, p.Limit, p.offset())
+			}
+		} else {
+			notes, hasMore, err = s.db.SearchNotes(query, p.Limit, p.offset())
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return

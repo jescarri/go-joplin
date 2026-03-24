@@ -18,27 +18,32 @@ type SyncTrigger interface {
 
 // Server is the Joplin Clipper REST API server.
 type Server struct {
-	db         *store.DB
-	apiToken   string
-	apiKey     string
-	router     chi.Router
-	syncer     SyncTrigger
-	policy     *mcp.Policy // nil = all mutations denied
-	mcpHandler http.Handler
+	db          *store.DB
+	apiToken    string
+	apiKey      string
+	router      chi.Router
+	syncer      SyncTrigger
+	policy      *mcp.Policy // nil = all mutations denied
+	mcpHandler  http.Handler
+	ragSearcher mcp.RAGSearcher // nil = FTS4 fallback
+	ragIndexer  mcp.RAGIndexer  // nil = no RAG indexing
 }
 
 // NewServer creates a new clipper server.
 // syncer may be nil if no sync trigger is desired.
 // policy may be nil; if nil, all mutations are denied (read-only).
 // mcpHandler may be nil; if set, it is mounted at /mcp (Bearer auth applied).
-func NewServer(db *store.DB, apiToken string, apiKey string, syncer SyncTrigger, policy *mcp.Policy, mcpHandler http.Handler) *Server {
+// ragSearcher and ragIndexer may be nil when RAG is disabled.
+func NewServer(db *store.DB, apiToken string, apiKey string, syncer SyncTrigger, policy *mcp.Policy, mcpHandler http.Handler, ragSearcher mcp.RAGSearcher, ragIndexer mcp.RAGIndexer) *Server {
 	s := &Server{
-		db:         db,
-		apiToken:   apiToken,
-		apiKey:     apiKey,
-		syncer:     syncer,
-		policy:     policy,
-		mcpHandler: mcpHandler,
+		db:          db,
+		apiToken:    apiToken,
+		apiKey:      apiKey,
+		syncer:      syncer,
+		policy:      policy,
+		mcpHandler:  mcpHandler,
+		ragSearcher: ragSearcher,
+		ragIndexer:  ragIndexer,
 	}
 	s.buildRouter()
 	return s
