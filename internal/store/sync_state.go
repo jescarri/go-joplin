@@ -151,6 +151,9 @@ func (db *DB) DeleteLocalItem(itemID string, itemType int) error {
 	switch itemType {
 	case models.TypeNote:
 		_, err = db.Exec("DELETE FROM notes WHERE id = ?", itemID)
+		if err == nil {
+			_ = db.DeleteNoteRAGData(itemID)
+		}
 	case models.TypeFolder:
 		_, err = db.Exec("DELETE FROM folders WHERE id = ?", itemID)
 	case models.TypeTag:

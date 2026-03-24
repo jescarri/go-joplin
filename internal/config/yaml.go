@@ -18,6 +18,7 @@ type yamlConfig struct {
 	Server        yamlServer        `yaml:"server"`
 	Observability yamlObservability `yaml:"observability"`
 	MCP           yamlMCP           `yaml:"mcp"`
+	RAG           yamlRAG           `yaml:"rag"`
 }
 
 type yamlSync struct {
@@ -73,6 +74,18 @@ type yamlMCP struct {
 	AllowCreateTag    bool   `yaml:"allow_create_tag"`
 	AllowCreateFolder bool   `yaml:"allow_create_folder"`
 	EnabledTools      string `yaml:"enabled_tools"`
+}
+
+type yamlRAG struct {
+	Enabled      bool   `yaml:"enabled"`
+	Endpoint     string `yaml:"endpoint"`
+	APIKey       string `yaml:"api_key"`
+	Model        string `yaml:"model"`
+	Dimensions   int    `yaml:"dimensions"`
+	ChunkSize    int    `yaml:"chunk_size"`
+	ChunkOverlap int    `yaml:"chunk_overlap"`
+	Workers      int    `yaml:"workers"`
+	QueueSize    int    `yaml:"queue_size"`
 }
 
 // loadFromYAML parses data as the native YAML config and returns a Config.
@@ -165,6 +178,19 @@ func loadFromYAML(data []byte) (*Config, error) {
 	cfg.MCPAllowCreateTag = y.MCP.AllowCreateTag
 	cfg.MCPAllowCreateFolder = y.MCP.AllowCreateFolder
 	cfg.MCPEnabledTools = strings.TrimSpace(y.MCP.EnabledTools)
+
+	// RAG
+	cfg.RAG = RAGConfig{
+		Enabled:      y.RAG.Enabled,
+		Endpoint:     ExpandEnv(y.RAG.Endpoint),
+		APIKey:       ExpandEnv(y.RAG.APIKey),
+		Model:        y.RAG.Model,
+		Dimensions:   y.RAG.Dimensions,
+		ChunkSize:    y.RAG.ChunkSize,
+		ChunkOverlap: y.RAG.ChunkOverlap,
+		Workers:      y.RAG.Workers,
+		QueueSize:    y.RAG.QueueSize,
+	}
 
 	return cfg, nil
 }
@@ -289,5 +315,61 @@ func applyRuntimeDefaults(cfg *Config) {
 	}
 	if v := os.Getenv("GOJOPLIN_MCP_ENABLED_TOOLS"); v != "" {
 		cfg.MCPEnabledTools = strings.TrimSpace(v)
+	}
+
+	// RAG env overrides
+	if v := os.Getenv("GOJOPLIN_RAG_ENABLED"); v != "" {
+		cfg.RAG.Enabled = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v := os.Getenv("GOJOPLIN_RAG_ENDPOINT"); v != "" {
+		cfg.RAG.Endpoint = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("GOJOPLIN_RAG_API_KEY"); v != "" {
+		cfg.RAG.APIKey = v
+	}
+	if v := os.Getenv("GOJOPLIN_RAG_MODEL"); v != "" {
+		cfg.RAG.Model = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("GOJOPLIN_RAG_DIMENSIONS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.RAG.Dimensions = n
+		}
+	}
+	if v := os.Getenv("GOJOPLIN_RAG_CHUNK_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.RAG.ChunkSize = n
+		}
+	}
+	if v := os.Getenv("GOJOPLIN_RAG_CHUNK_OVERLAP"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.RAG.ChunkOverlap = n
+		}
+	}
+	if v := os.Getenv("GOJOPLIN_RAG_WORKERS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.RAG.Workers = n
+		}
+	}
+	if v := os.Getenv("GOJOPLIN_RAG_QUEUE_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.RAG.QueueSize = n
+		}
+	}
+
+	// RAG defaults
+	if cfg.RAG.Dimensions == 0 {
+		cfg.RAG.Dimensions = 1536
+	}
+	if cfg.RAG.ChunkSize == 0 {
+		cfg.RAG.ChunkSize = 512
+	}
+	if cfg.RAG.ChunkOverlap == 0 {
+		cfg.RAG.ChunkOverlap = 50
+	}
+	if cfg.RAG.Workers == 0 {
+		cfg.RAG.Workers = 2
+	}
+	if cfg.RAG.QueueSize == 0 {
+		cfg.RAG.QueueSize = 1000
 	}
 }

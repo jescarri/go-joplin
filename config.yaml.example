@@ -69,3 +69,18 @@ mcp:
   # Default "*" = all 13 tools. Set to a comma-separated list to reduce context tokens.
   # Example: "create_note,list_folders,list_tags,create_folder,search_notes"
   enabled_tools: "*"
+
+# RAG (Retrieval Augmented Generation) semantic search. Disabled by default.
+# When enabled, note search uses vector embeddings instead of FTS4 keyword matching.
+# Requires an OpenAI-compatible embedding API endpoint.
+# Overridable by GOJOPLIN_RAG_* env vars.
+rag:
+  enabled: false
+  endpoint: "${GOJOPLIN_RAG_ENDPOINT}"    # e.g. "https://api.openai.com/v1" or "http://localhost:11434/v1"
+  api_key: "${GOJOPLIN_RAG_API_KEY}"
+  model: "text-embedding-3-small"
+  dimensions: 1536
+  chunk_size: 512
+  chunk_overlap: 50
+  workers: 2
+  queue_size: 1000

@@ -109,6 +109,9 @@ func (s *Server) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if s.ragIndexer != nil {
+		s.ragIndexer.Enqueue(note.ID)
+	}
 	s.triggerSync()
 	writeJSON(w, http.StatusOK, note)
 }
@@ -206,6 +209,9 @@ func (s *Server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.ragIndexer != nil {
+		s.ragIndexer.Enqueue(existing.ID)
+	}
 	s.triggerSync()
 	writeJSON(w, http.StatusOK, existing)
 }
@@ -232,6 +238,7 @@ func (s *Server) handleDeleteNote(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	_ = s.db.DeleteNoteRAGData(id)
 	s.triggerSync()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

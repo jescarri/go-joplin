@@ -7,13 +7,16 @@ FROM golang:${GO_VERSION}-bookworm AS builder
 
 WORKDIR /build
 
+# Install C headers for sqlite-vec (sqlite3.h required by CGO bindings)
+RUN apt-get update && apt-get install -y --no-install-recommends libsqlite3-dev && rm -rf /var/lib/apt/lists/*
+
 # Download dependencies
 COPY go.mod go.sum ./
 RUN go mod download
 
 # Copy source and run tests
 COPY . .
-RUN go test ./...
+RUN CGO_ENABLED=1 go test ./...
 
 # Build binary (CGO required for sqlite3)
 RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o go-joplin .

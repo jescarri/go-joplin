@@ -12,6 +12,7 @@ import (
 
 	"github.com/jescarri/go-joplin/internal/clipper"
 	"github.com/jescarri/go-joplin/internal/mcp"
+	"github.com/jescarri/go-joplin/internal/rag"
 	"github.com/jescarri/go-joplin/internal/store"
 	"github.com/jescarri/go-joplin/internal/sync"
 	"github.com/jescarri/go-joplin/internal/telemetry"
@@ -61,6 +62,30 @@ var serveCmd = &cobra.Command{
 		}
 		defer db.Close()
 
+		// RAG setup (before sync loop so indexer is ready for post-sync indexing)
+		var ragIndexer *rag.Indexer
+		var ragSearcher mcp.RAGSearcher
+		var ragIdx mcp.RAGIndexer
+		if cfg.RAG.Enabled {
+			slog.Info("RAG semantic search enabled",
+				"model", cfg.RAG.Model,
+				"dimensions", cfg.RAG.Dimensions,
+				"endpoint", cfg.RAG.Endpoint,
+				"chunk_size", cfg.RAG.ChunkSize,
+				"chunk_overlap", cfg.RAG.ChunkOverlap,
+				"workers", cfg.RAG.Workers,
+			)
+			if err := db.InitRAG(cfg.RAG.Model, cfg.RAG.Dimensions); err != nil {
+				return fmt.Errorf("rag init: %w", err)
+			}
+			embedder := rag.NewOpenAIEmbedder(cfg.RAG.Endpoint, cfg.RAG.APIKey, cfg.RAG.Model, cfg.RAG.Dimensions)
+			ragIndexer = rag.NewIndexer(db, embedder, cfg.RAG.ChunkSize, cfg.RAG.ChunkOverlap, cfg.RAG.Workers, cfg.RAG.QueueSize)
+			ragSearcher = ragIndexer
+			ragIdx = ragIndexer
+		} else {
+			slog.Info("RAG semantic search disabled, using FTS4 keyword search")
+		}
+
 		var backend sync.SyncBackend
 		if cfg.SyncTarget == 8 {
 			b, err := sync.NewS3Backend(cfg)
@@ -82,6 +107,24 @@ var serveCmd = &cobra.Command{
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
+		// ragReindex runs IndexAll in a goroutine, logging errors.
+		ragReindex := func() {
+			if ragIndexer != nil {
+				go func() {
+					if err := ragIndexer.IndexAll(ctx); err != nil {
+						slog.Error("RAG reindex failed", "error", err)
+					}
+				}()
+			}
+		}
+
+		// Start RAG indexer workers (after ctx is created)
+		if ragIndexer != nil {
+			ragIndexer.Start(ctx)
+			defer ragIndexer.Stop()
+			ragReindex()
+		}
+
 		go func() {
 			ticker := time.NewTicker(10 * time.Minute)
 			defer ticker.Stop()
@@ -89,6 +132,8 @@ var serveCmd = &cobra.Command{
 			// Initial sync
 			if err := engine.Sync(ctx); err != nil {
 				slog.Error("initial sync failed", "error", err)
+			} else {
+				ragReindex()
 			}
 
 			for {
@@ -98,10 +143,14 @@ var serveCmd = &cobra.Command{
 				case <-ticker.C:
 					if err := engine.Sync(ctx); err != nil {
 						slog.Error("sync failed", "error", err)
+					} else {
+						ragReindex()
 					}
 				case <-engine.TriggerCh():
 					if err := engine.Sync(ctx); err != nil {
 						slog.Error("triggered sync failed", "error", err)
+					} else {
+						ragReindex()
 					}
 				}
 			}
@@ -110,11 +159,18 @@ var serveCmd = &cobra.Command{
 		policy := mcp.NewPolicy(cfg)
 		var mcpHandler http.Handler
 		{
-			mcpDeps := &mcp.Deps{DB: db, Syncer: engine, Policy: policy, EnabledTools: cfg.MCPEnabledTools}
+			mcpDeps := &mcp.Deps{
+				DB:           db,
+				Syncer:       engine,
+				Policy:       policy,
+				EnabledTools: cfg.MCPEnabledTools,
+				RAGSearcher:  ragSearcher,
+				RAGIndexer:   ragIdx,
+			}
 			mcpServer := mcp.NewServer(mcpDeps)
 			mcpHandler = mcp.NewSSEHandler(func(r *http.Request) *mcp.Server { return mcpServer })
 		}
-		srv := clipper.NewServer(db, cfg.APIToken, cfg.APIKey, engine, policy, mcpHandler)
+		srv := clipper.NewServer(db, cfg.APIToken, cfg.APIKey, engine, policy, mcpHandler, ragSearcher, ragIdx)
 		addr := cfg.ListenAddr()
 		slog.Info("starting clipper server", "addr", addr)
 
