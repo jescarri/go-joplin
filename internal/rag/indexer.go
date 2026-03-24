@@ -35,6 +35,7 @@ type Indexer struct {
 	embedder  Embedder
 	chunkSize int
 	overlap   int
+	workers   int
 	queue     chan string
 	wg        sync.WaitGroup
 	cancel    context.CancelFunc
@@ -42,11 +43,15 @@ type Indexer struct {
 
 // NewIndexer creates a new RAG indexer.
 func NewIndexer(db RAGStore, embedder Embedder, chunkSize, overlap, workers, queueSize int) *Indexer {
+	if workers <= 0 {
+		workers = 2
+	}
 	return &Indexer{
 		db:        db,
 		embedder:  embedder,
 		chunkSize: chunkSize,
 		overlap:   overlap,
+		workers:   workers,
 		queue:     make(chan string, queueSize),
 	}
 }
@@ -54,12 +59,11 @@ func NewIndexer(db RAGStore, embedder Embedder, chunkSize, overlap, workers, que
 // Start launches worker goroutines that process the queue.
 func (idx *Indexer) Start(ctx context.Context) {
 	ctx, idx.cancel = context.WithCancel(ctx)
-	workers := 2
-	for i := range workers {
+	for i := range idx.workers {
 		idx.wg.Add(1)
 		go idx.worker(ctx, i)
 	}
-	slog.Info("RAG indexer started", "workers", workers)
+	slog.Info("RAG indexer started", "workers", idx.workers)
 }
 
 // Stop cancels workers and waits for them to finish.

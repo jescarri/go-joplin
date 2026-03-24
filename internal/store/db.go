@@ -356,6 +356,9 @@ func (db *DB) InitRAG(model string, dimensions int) error {
 		return fmt.Errorf("create rag_vec: %w", err)
 	}
 
+	if err := db.setKV("rag_schema_version", "1"); err != nil {
+		return err
+	}
 	if err := db.setKV("rag_model", model); err != nil {
 		return err
 	}

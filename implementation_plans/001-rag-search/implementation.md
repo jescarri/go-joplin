@@ -20,7 +20,7 @@ Current search uses SQLite FTS4 (keyword matching). We want to replace the note 
 
 **Files:**
 - `go.mod` — add `github.com/asg017/sqlite-vec-go-bindings/cgo`
-- `internal/store/db.go` — call `sqlite_vec.Auto()` before any `sql.Open`, add RAG schema tables
+- `internal/store/db.go` — call `sqlite_vec.Auto()` before any `sql.Open`; RAG tables are created in `InitRAG()` (not in the main v49 schema migration) so they work on existing databases
 
 **Data model — see ADR section 2 for full details including ER diagram.**
 
@@ -31,7 +31,7 @@ Relationship chain: `notes` ←(1:1)— `rag_note_hashes` | `notes` ←(N:1)— 
 - `rag_vec.chunk_id` → `rag_chunks.id` — each chunk has exactly one embedding vector
 - No SQL foreign keys on `rag_vec` (vec0 virtual tables don't support them) — cascade handled in application code
 
-**New tables in `db.go` schema statements:**
+**RAG tables (created in `InitRAG()` via `ragSchemaStatements`, not in the main migration):**
 
 ```sql
 CREATE TABLE IF NOT EXISTS rag_note_hashes (
@@ -121,11 +121,14 @@ type ChunkResult struct {
 ```go
 // Indexer manages the async pipeline: hash check → chunk → embed → store.
 type Indexer struct {
-    db       RAGStore      // interface for DB operations
-    embedder Embedder
-    cfg      IndexerConfig
-    queue    chan string    // note IDs to process
-    wg       sync.WaitGroup
+    db        RAGStore
+    embedder  Embedder
+    chunkSize int
+    overlap   int
+    workers   int
+    queue     chan string
+    wg        sync.WaitGroup
+    cancel    context.CancelFunc
 }
 
 // RAGStore is the interface the indexer needs from the store.
@@ -136,7 +139,10 @@ type RAGStore interface {
     DeleteChunksByNoteID(noteID string) error
     InsertChunk(noteID string, idx int, content string, tokenCount int) (int64, error)
     InsertChunkEmbedding(chunkID int64, embedding []float32) error
-    SearchVectors(embedding []float32, limit int) ([]VectorResult, error)
+    SearchVectors(embedding []float32, limit int) ([]store.VectorResult, error)
+    DeleteNoteRAGData(noteID string) error
+    ListAllNoteIDs() ([]string, error)
+    ListIndexedNoteIDs() ([]string, error)  // for orphan cleanup in IndexAll
 }
 ```
 
@@ -203,12 +209,12 @@ type VectorResult struct {
 
 **Vector search query:**
 ```sql
+-- Note: sqlite-vec requires cv.k = ? instead of LIMIT for KNN queries
 SELECT cv.chunk_id, c.note_id, cv.distance
 FROM rag_vec cv
 JOIN rag_chunks c ON c.id = cv.chunk_id
-WHERE cv.embedding MATCH ?
+WHERE cv.embedding MATCH ? AND cv.k = ?
 ORDER BY cv.distance
-LIMIT ?
 ```
 
 ---

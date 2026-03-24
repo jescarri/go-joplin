@@ -40,7 +40,7 @@ internal/store/
 
 ### 2. Database Schema
 
-RAG tables live in the same `gojoplin.sqlite` but use the `rag_` prefix and are never referenced by the sync engine. Migration is gated behind a separate `rag_schema_version` key in `key_values`.
+RAG tables live in the same `gojoplin.sqlite` but use the `rag_` prefix and are never referenced by the sync engine. RAG tables are created in `InitRAG()` (not in the main Joplin v49 schema migration) so they are always created when RAG is enabled, even on databases that predate RAG. A `rag_schema_version` key in `key_values` tracks the RAG schema version for future migrations.
 
 #### Data Model
 
@@ -70,12 +70,12 @@ notes (existing)          rag_note_hashes           rag_chunks              rag_
 
 ```sql
 -- Step 1: KNN search → chunk_ids with distances
+-- Note: sqlite-vec requires cv.k = ? instead of LIMIT for KNN queries
 SELECT cv.chunk_id, c.note_id, cv.distance
 FROM rag_vec cv
 JOIN rag_chunks c ON c.id = cv.chunk_id
-WHERE cv.embedding MATCH ?    -- query vector
+WHERE cv.embedding MATCH ? AND cv.k = ?  -- query vector, over-fetch (limit * 3) for dedup
 ORDER BY cv.distance
-LIMIT ?                       -- over-fetch (limit * 3) for dedup
 
 -- Step 2: application-level dedup by note_id, keep lowest distance per note
 -- Step 3: SELECT * FROM notes WHERE id IN (?) for the top N note_ids
@@ -232,9 +232,10 @@ type RAGStore interface {
     DeleteChunksByNoteID(noteID string) error
     InsertChunk(noteID string, idx int, content string, tokenCount int) (int64, error)
     InsertChunkEmbedding(chunkID int64, embedding []float32) error
-    SearchVectors(embedding []float32, limit int) ([]VectorResult, error)
+    SearchVectors(embedding []float32, limit int) ([]store.VectorResult, error)
     DeleteNoteRAGData(noteID string) error
     ListAllNoteIDs() ([]string, error)
+    ListIndexedNoteIDs() ([]string, error)  // for orphan cleanup in IndexAll
 }
 
 // RAGSearcher performs semantic search across notes.
