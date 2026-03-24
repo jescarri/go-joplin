@@ -67,6 +67,14 @@ var serveCmd = &cobra.Command{
 		var ragSearcher mcp.RAGSearcher
 		var ragIdx mcp.RAGIndexer
 		if cfg.RAG.Enabled {
+			slog.Info("RAG semantic search enabled",
+				"model", cfg.RAG.Model,
+				"dimensions", cfg.RAG.Dimensions,
+				"endpoint", cfg.RAG.Endpoint,
+				"chunk_size", cfg.RAG.ChunkSize,
+				"chunk_overlap", cfg.RAG.ChunkOverlap,
+				"workers", cfg.RAG.Workers,
+			)
 			if err := db.InitRAG(cfg.RAG.Model, cfg.RAG.Dimensions); err != nil {
 				return fmt.Errorf("rag init: %w", err)
 			}
@@ -74,7 +82,8 @@ var serveCmd = &cobra.Command{
 			ragIndexer = rag.NewIndexer(db, embedder, cfg.RAG.ChunkSize, cfg.RAG.ChunkOverlap, cfg.RAG.Workers, cfg.RAG.QueueSize)
 			ragSearcher = ragIndexer
 			ragIdx = ragIndexer
-			slog.Info("RAG enabled", "model", cfg.RAG.Model, "dimensions", cfg.RAG.Dimensions)
+		} else {
+			slog.Info("RAG semantic search disabled, using FTS4 keyword search")
 		}
 
 		var backend sync.SyncBackend

@@ -18,7 +18,7 @@ func TestSearch_ReturnsNotes(t *testing.T) {
 	n3 := createTestNote(t, db, "Go Programming", "goroutines and channels")
 
 	for _, id := range []string{n1.ID, n2.ID, n3.ID} {
-		if err := idx.indexNote(context.Background(), id); err != nil {
+		if _, err := idx.indexNote(context.Background(), id); err != nil {
 			t.Fatalf("indexNote(%s): %v", id, err)
 		}
 	}
@@ -70,7 +70,7 @@ func TestSearch_LimitRespected(t *testing.T) {
 	// Create 5 notes
 	for i := range 5 {
 		n := createTestNote(t, db, "Note"+string(rune('A'+i)), "content for note")
-		if err := idx.indexNote(context.Background(), n.ID); err != nil {
+		if _, err := idx.indexNote(context.Background(), n.ID); err != nil {
 			t.Fatalf("indexNote: %v", err)
 		}
 	}
@@ -92,7 +92,7 @@ func TestSearch_DeduplicatesChunks(t *testing.T) {
 
 	// Create a note with enough words to produce multiple chunks
 	n := createTestNote(t, db, "Long Note", "one two three four five six seven eight nine ten eleven twelve")
-	if err := idx.indexNote(context.Background(), n.ID); err != nil {
+	if _, err := idx.indexNote(context.Background(), n.ID); err != nil {
 		t.Fatalf("indexNote: %v", err)
 	}
 
@@ -119,7 +119,7 @@ func TestSearch_ResponseFormat(t *testing.T) {
 	idx := NewIndexer(db, emb, 512, 50, 1, 10)
 
 	n := createTestNote(t, db, "My Note", "some body content")
-	if err := idx.indexNote(context.Background(), n.ID); err != nil {
+	if _, err := idx.indexNote(context.Background(), n.ID); err != nil {
 		t.Fatalf("indexNote: %v", err)
 	}
 

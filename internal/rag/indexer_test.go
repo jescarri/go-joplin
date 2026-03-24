@@ -41,7 +41,7 @@ func TestIndexNote_NewNote(t *testing.T) {
 	idx := NewIndexer(db, emb, 512, 50, 1, 10)
 
 	note := createTestNote(t, db, "Test", "hello world content here")
-	if err := idx.indexNote(context.Background(), note.ID); err != nil {
+	if _, err := idx.indexNote(context.Background(), note.ID); err != nil {
 		t.Fatalf("indexNote: %v", err)
 	}
 
@@ -65,7 +65,7 @@ func TestIndexNote_UnchangedNote(t *testing.T) {
 	note := createTestNote(t, db, "Test", "hello world")
 
 	// Index once
-	if err := idx.indexNote(context.Background(), note.ID); err != nil {
+	if _, err := idx.indexNote(context.Background(), note.ID); err != nil {
 		t.Fatalf("first indexNote: %v", err)
 	}
 	if emb.callCount() != 1 {
@@ -73,7 +73,7 @@ func TestIndexNote_UnchangedNote(t *testing.T) {
 	}
 
 	// Index again — should skip
-	if err := idx.indexNote(context.Background(), note.ID); err != nil {
+	if _, err := idx.indexNote(context.Background(), note.ID); err != nil {
 		t.Fatalf("second indexNote: %v", err)
 	}
 	if emb.callCount() != 1 {
@@ -89,7 +89,7 @@ func TestIndexNote_UpdatedNote(t *testing.T) {
 	note := createTestNote(t, db, "Test", "original body")
 
 	// Index original
-	if err := idx.indexNote(context.Background(), note.ID); err != nil {
+	if _, err := idx.indexNote(context.Background(), note.ID); err != nil {
 		t.Fatalf("first indexNote: %v", err)
 	}
 	hash1, _ := db.GetNoteHash(note.ID)
@@ -101,7 +101,7 @@ func TestIndexNote_UpdatedNote(t *testing.T) {
 	}
 
 	// Re-index — should detect change
-	if err := idx.indexNote(context.Background(), note.ID); err != nil {
+	if _, err := idx.indexNote(context.Background(), note.ID); err != nil {
 		t.Fatalf("second indexNote: %v", err)
 	}
 	hash2, _ := db.GetNoteHash(note.ID)
@@ -123,7 +123,7 @@ func TestIndexNote_EncryptedNote(t *testing.T) {
 		t.Fatalf("CreateNote: %v", err)
 	}
 
-	if err := idx.indexNote(context.Background(), note.ID); err != nil {
+	if _, err := idx.indexNote(context.Background(), note.ID); err != nil {
 		t.Fatalf("indexNote: %v", err)
 	}
 
@@ -146,7 +146,7 @@ func TestIndexNote_EmbedError(t *testing.T) {
 
 	note := createTestNote(t, db, "Test", "hello world")
 
-	err := idx.indexNote(context.Background(), note.ID)
+	_, err := idx.indexNote(context.Background(), note.ID)
 	if err == nil {
 		t.Fatal("expected error from failing embedder")
 	}
@@ -166,7 +166,7 @@ func TestIndexAll_OrphanCleanup(t *testing.T) {
 	note := createTestNote(t, db, "Test", "hello")
 
 	// Index the note
-	if err := idx.indexNote(context.Background(), note.ID); err != nil {
+	if _, err := idx.indexNote(context.Background(), note.ID); err != nil {
 		t.Fatalf("indexNote: %v", err)
 	}
 
@@ -219,7 +219,7 @@ func TestIndexAll_MixedNotes(t *testing.T) {
 	}
 
 	// Pre-index note2
-	if err := idx.indexNote(context.Background(), note2.ID); err != nil {
+	if _, err := idx.indexNote(context.Background(), note2.ID); err != nil {
 		t.Fatalf("pre-index: %v", err)
 	}
 	callsBefore := emb.callCount()

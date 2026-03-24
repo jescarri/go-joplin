@@ -89,31 +89,45 @@ func (idx *Indexer) worker(ctx context.Context, id int) {
 			return
 		case noteID := <-idx.queue:
 			IndexQueueDepth.Set(float64(len(idx.queue)))
-			if err := idx.indexNote(ctx, noteID); err != nil {
+			if _, err := idx.indexNote(ctx, noteID); err != nil {
 				slog.Error("RAG index failed", "note_id", noteID, "worker", id, "error", err)
 			}
 		}
 	}
 }
 
+// indexResult is returned by indexNote to report what happened.
+type indexResult int
+
+const (
+	indexResultIndexed   indexResult = iota
+	indexResultSkipped               // hash unchanged or encrypted
+	indexResultError
+	indexResultDeleted               // note was deleted, RAG data cleaned up
+)
+
 // IndexAll iterates all notes and indexes changed ones. Also cleans up orphans.
 func (idx *Indexer) IndexAll(ctx context.Context) error {
 	ctx, span := tracer.Start(ctx, "rag.index_all")
 	defer span.End()
+
+	slog.Info("RAG IndexAll starting")
 
 	// Clean up orphaned RAG data
 	indexed, err := idx.db.ListIndexedNoteIDs()
 	if err != nil {
 		return err
 	}
+	var orphans int
 	for _, noteID := range indexed {
 		note, err := idx.db.GetNote(noteID)
 		if err != nil {
 			continue
 		}
 		if note == nil {
-			slog.Info("cleaning up orphaned RAG data", "note_id", noteID)
+			slog.Debug("cleaning up orphaned RAG data", "note_id", noteID)
 			_ = idx.db.DeleteNoteRAGData(noteID)
+			orphans++
 		}
 	}
 
@@ -123,32 +137,45 @@ func (idx *Indexer) IndexAll(ctx context.Context) error {
 		return err
 	}
 
-	var indexedCount, skipped int
+	var indexedCount, skippedCount, errorCount int
 	for _, noteID := range allIDs {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
-		if err := idx.indexNote(ctx, noteID); err != nil {
+		result, err := idx.indexNote(ctx, noteID)
+		if err != nil {
 			slog.Error("RAG index failed during IndexAll", "note_id", noteID, "error", err)
+			errorCount++
 			continue
 		}
-		// Check if it was skipped by looking at whether the note was actually processed.
-		// We count based on the hash check in indexNote; here we just count attempts.
-		indexedCount++
+		switch result {
+		case indexResultIndexed:
+			indexedCount++
+		case indexResultSkipped:
+			skippedCount++
+		}
 	}
 
 	span.SetAttributes(
 		attribute.Int("total_notes", len(allIDs)),
-		attribute.Int("processed", indexedCount),
-		attribute.Int("skipped", skipped),
+		attribute.Int("indexed", indexedCount),
+		attribute.Int("skipped", skippedCount),
+		attribute.Int("errors", errorCount),
+		attribute.Int("orphans_cleaned", orphans),
 	)
-	slog.Info("RAG IndexAll completed", "total", len(allIDs), "processed", indexedCount)
+	slog.Info("RAG IndexAll completed",
+		"total", len(allIDs),
+		"indexed", indexedCount,
+		"skipped", skippedCount,
+		"errors", errorCount,
+		"orphans_cleaned", orphans,
+	)
 	return nil
 }
 
-func (idx *Indexer) indexNote(ctx context.Context, noteID string) error {
+func (idx *Indexer) indexNote(ctx context.Context, noteID string) (indexResult, error) {
 	start := time.Now()
 	ctx, span := tracer.Start(ctx, "rag.index_note")
 	defer span.End()
@@ -157,19 +184,19 @@ func (idx *Indexer) indexNote(ctx context.Context, noteID string) error {
 	note, err := idx.db.GetNote(noteID)
 	if err != nil {
 		IndexNotesTotal.WithLabelValues("error").Inc()
-		return err
+		return indexResultError, err
 	}
 	if note == nil {
 		// Note was deleted; clean up if there's leftover RAG data
 		_ = idx.db.DeleteNoteRAGData(noteID)
-		return nil
+		return indexResultDeleted, nil
 	}
 
 	// Skip encrypted notes
 	if note.EncryptionApplied == 1 {
 		IndexNotesTotal.WithLabelValues("skip").Inc()
 		span.SetAttributes(attribute.String("status", "skip_encrypted"))
-		return nil
+		return indexResultSkipped, nil
 	}
 
 	// Hash check
@@ -177,12 +204,12 @@ func (idx *Indexer) indexNote(ctx context.Context, noteID string) error {
 	existingHash, err := idx.db.GetNoteHash(noteID)
 	if err != nil {
 		IndexNotesTotal.WithLabelValues("error").Inc()
-		return err
+		return indexResultError, err
 	}
 	if existingHash == newHash {
 		IndexNotesTotal.WithLabelValues("skip").Inc()
 		span.SetAttributes(attribute.String("status", "skip_unchanged"))
-		return nil
+		return indexResultSkipped, nil
 	}
 
 	// Chunk
@@ -193,7 +220,7 @@ func (idx *Indexer) indexNote(ctx context.Context, noteID string) error {
 		_ = idx.db.DeleteChunksByNoteID(noteID)
 		_ = idx.db.UpsertNoteHash(noteID, newHash)
 		IndexNotesTotal.WithLabelValues("ok").Inc()
-		return nil
+		return indexResultIndexed, nil
 	}
 
 	// Embed
@@ -204,30 +231,30 @@ func (idx *Indexer) indexNote(ctx context.Context, noteID string) error {
 	embeddings, err := idx.embedder.Embed(ctx, texts)
 	if err != nil {
 		IndexNotesTotal.WithLabelValues("error").Inc()
-		return fmt.Errorf("embed: %w", err)
+		return indexResultError, fmt.Errorf("embed: %w", err)
 	}
 
 	// Store: delete old, insert new
 	if err := idx.db.DeleteChunksByNoteID(noteID); err != nil {
 		IndexNotesTotal.WithLabelValues("error").Inc()
-		return err
+		return indexResultError, err
 	}
 
 	for i, chunk := range chunks {
 		chunkID, err := idx.db.InsertChunk(noteID, chunk.Index, chunk.Content, chunk.TokenCount)
 		if err != nil {
 			IndexNotesTotal.WithLabelValues("error").Inc()
-			return fmt.Errorf("insert chunk %d: %w", i, err)
+			return indexResultError, fmt.Errorf("insert chunk %d: %w", i, err)
 		}
 		if err := idx.db.InsertChunkEmbedding(chunkID, embeddings[i]); err != nil {
 			IndexNotesTotal.WithLabelValues("error").Inc()
-			return fmt.Errorf("insert embedding %d: %w", i, err)
+			return indexResultError, fmt.Errorf("insert embedding %d: %w", i, err)
 		}
 	}
 
 	if err := idx.db.UpsertNoteHash(noteID, newHash); err != nil {
 		IndexNotesTotal.WithLabelValues("error").Inc()
-		return err
+		return indexResultError, err
 	}
 
 	IndexNotesTotal.WithLabelValues("ok").Inc()
@@ -237,7 +264,7 @@ func (idx *Indexer) indexNote(ctx context.Context, noteID string) error {
 		attribute.String("status", "indexed"),
 		attribute.Int("chunks_count", len(chunks)),
 	)
-	return nil
+	return indexResultIndexed, nil
 }
 
 func hashNoteContent(title, body string) string {

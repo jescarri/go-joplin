@@ -289,13 +289,17 @@ var schemaStatements = []string{
 	`CREATE INDEX IF NOT EXISTS idx_item_changes_item_id ON item_changes(item_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_item_changes_created_time ON item_changes(created_time)`,
 
-	// RAG tables (never synced; rag_ prefix)
+}
+
+// ragSchemaStatements creates the RAG tables. These are separate from the main
+// Joplin v49 schema so they are created in InitRAG (not migrate) — this ensures
+// they exist even on databases that were created before RAG was added.
+var ragSchemaStatements = []string{
 	`CREATE TABLE IF NOT EXISTS rag_note_hashes (
 		note_id    TEXT PRIMARY KEY,
 		body_hash  TEXT NOT NULL,
 		updated_at INTEGER NOT NULL DEFAULT 0
 	)`,
-
 	`CREATE TABLE IF NOT EXISTS rag_chunks (
 		id          INTEGER PRIMARY KEY AUTOINCREMENT,
 		note_id     TEXT NOT NULL,
@@ -304,13 +308,19 @@ var schemaStatements = []string{
 		token_count INTEGER NOT NULL DEFAULT 0,
 		UNIQUE(note_id, chunk_index)
 	)`,
-
 	`CREATE INDEX IF NOT EXISTS idx_rag_chunks_note_id ON rag_chunks(note_id)`,
 }
 
-// InitRAG creates or rebuilds the rag_vec virtual table. If the model or dimensions
+// InitRAG creates RAG tables and the vec0 virtual table. If the model or dimensions
 // changed since the last run, all RAG data is wiped to force a full re-index.
 func (db *DB) InitRAG(model string, dimensions int) error {
+	// Always ensure RAG tables exist (idempotent)
+	for _, stmt := range ragSchemaStatements {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("RAG schema: %w", err)
+		}
+	}
+
 	storedModel := db.getKV("rag_model")
 	storedDims := db.getKV("rag_dimensions")
 
